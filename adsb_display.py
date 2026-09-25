@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-ADS-B Radar Display – Testversion für Raspberry Pi 4 / Windows
-
-Funktionen:
-- DEMO-Modus mit simulierten Flugzeugen
-- LIVE-Modus liest /run/readsb/aircraft.json
-- Radaransicht mit Distanzringen, Himmelsrichtungen und Sweep
-- Flugzeugliste mit Callsign, Entfernung, Höhe, Geschwindigkeit und Kurs
-- Klick auf ein Flugzeug zeigt Detailinformationen
-- Keine Datenbank notwendig: aktuelle Flugzeuge liegen nur im RAM
-
-Tastatur:
-    D = Demo / Live
-    F = Vollbild
-    +/- = Radarreichweite ändern
-    ESC = Ende
-"""
+"""Clean ADS-B radar display – Demo + readsb live data."""
 
 import json
 import math
@@ -25,13 +9,7 @@ import time
 import tkinter as tk
 from tkinter import font
 
-# ------------------------------------------------------------
-# Einstellungen
-# ------------------------------------------------------------
-
 AIRCRAFT_FILE = "/run/readsb/aircraft.json"
-
-# Später durch die exakten Koordinaten eurer Empfangsstation ersetzen.
 STATION_LAT = 47.8095
 STATION_LON = 13.0550
 
@@ -39,42 +17,46 @@ RADAR_RANGE_KM = 80.0
 RANGE_STEPS = [20.0, 40.0, 60.0, 80.0, 120.0, 160.0]
 FRAME_MS = 33
 DATA_UPDATE_MS = 500
-MAX_LIST_PLANES = 11
+MAX_LIST_PLANES = 10
 
-# ------------------------------------------------------------
-# Farben / Hilfsfunktionen
-# ------------------------------------------------------------
+# Clean, modern dark UI
+BG = "#0B0F14"
+PANEL = "#11171E"
+PANEL_2 = "#151D25"
+BORDER = "#27313B"
+GRID = "#26333D"
+GRID_SOFT = "#1A242D"
+TEXT = "#F2F5F7"
+MUTED = "#8C99A5"
+ACCENT = "#58C7FF"
+ACCENT_SOFT = "#244D61"
+WARNING = "#F5C451"
 
-BG = "#020703"
-PANEL_BG = "#051109"
-GRID = "#125d31"
-GRID_DARK = "#0a331c"
-GREEN = "#20ff75"
-GREEN_DIM = "#75c895"
-WHITE = "#eafff0"
-YELLOW = "#ffe66d"
-RED = "#ff6666"
-CYAN = "#74e8ff"
+DEMO_AIRCRAFT = [
+    {"hex": "3C4AAA", "flight": "DLH123", "lat": 47.95, "lon": 13.25, "altitude_baro": 32000, "gs": 450, "track": 275},
+    {"hex": "4CA111", "flight": "RYR45", "lat": 47.70, "lon": 12.80, "altitude_baro": 18000, "gs": 420, "track": 95},
+    {"hex": "4402BB", "flight": "AUA62", "lat": 48.00, "lon": 13.00, "altitude_baro": 24000, "gs": 390, "track": 180},
+    {"hex": "471234", "flight": "WZZ81", "lat": 47.65, "lon": 13.35, "altitude_baro": 14500, "gs": 370, "track": 35},
+    {"hex": "495211", "flight": "TAP72", "lat": 47.58, "lon": 12.98, "altitude_baro": 21000, "gs": 405, "track": 320},
+    {"hex": "406789", "flight": "BAW91", "lat": 47.86, "lon": 13.42, "altitude_baro": 28000, "gs": 430, "track": 65},
+    {"hex": "4B1234", "flight": "SWR34", "lat": 48.15, "lon": 13.28, "altitude_baro": 36000, "gs": 470, "track": 210},
+    {"hex": "3D7788", "flight": "EZY18", "lat": 47.47, "lon": 13.18, "altitude_baro": 12000, "gs": 340, "track": 15},
+    {"hex": "4A5566", "flight": "UAE50", "lat": 48.02, "lon": 12.70, "altitude_baro": 39000, "gs": 465, "track": 110},
+]
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
-    """Entfernung zwischen zwei GPS-Punkten in km."""
     r = 6371.0
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
+    p1, p2 = math.radians(lat1), math.radians(lat2)
     dp = math.radians(lat2 - lat1)
     dl = math.radians(lon2 - lon1)
-
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * r * math.asin(math.sqrt(a))
 
 
 def bearing_deg(lat1, lon1, lat2, lon2):
-    """Richtung von Punkt 1 nach Punkt 2 in Grad."""
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
+    p1, p2 = math.radians(lat1), math.radians(lat2)
     dl = math.radians(lon2 - lon1)
-
     x = math.sin(dl) * math.cos(p2)
     y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
     return (math.degrees(math.atan2(x, y)) + 360) % 360
@@ -120,58 +102,23 @@ def format_track(value):
         return "---"
 
 
-def short_direction(deg):
-    """Gradwert -> grobe Himmelsrichtung."""
-    if deg is None:
-        return "---"
-    try:
-        dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-        index = int((float(deg) + 22.5) // 45) % 8
-        return dirs[index]
-    except (ValueError, TypeError):
-        return "---"
-
-# ------------------------------------------------------------
-# Demo-Daten
-# ------------------------------------------------------------
-
-DEMO_AIRCRAFT = [
-    {"hex": "3C4AAA", "flight": "DLH123", "lat": 47.95, "lon": 13.25, "altitude_baro": 32000, "gs": 450, "track": 275},
-    {"hex": "4CA111", "flight": "RYR45", "lat": 47.70, "lon": 12.80, "altitude_baro": 18000, "gs": 420, "track": 95},
-    {"hex": "4402BB", "flight": "AUA62", "lat": 48.00, "lon": 13.00, "altitude_baro": 24000, "gs": 390, "track": 180},
-    {"hex": "471234", "flight": "WZZ81", "lat": 47.65, "lon": 13.35, "altitude_baro": 14500, "gs": 370, "track": 35},
-    {"hex": "495211", "flight": "TAP72", "lat": 47.58, "lon": 12.98, "altitude_baro": 21000, "gs": 405, "track": 320},
-    {"hex": "406789", "flight": "BAW91", "lat": 47.86, "lon": 13.42, "altitude_baro": 28000, "gs": 430, "track": 65},
-    {"hex": "4B1234", "flight": "SWR34", "lat": 48.15, "lon": 13.28, "altitude_baro": 36000, "gs": 470, "track": 210},
-    {"hex": "3D7788", "flight": "EZY18", "lat": 47.47, "lon": 13.18, "altitude_baro": 12000, "gs": 340, "track": 15},
-    {"hex": "4A5566", "flight": "UAE50", "lat": 48.02, "lon": 12.70, "altitude_baro": 39000, "gs": 465, "track": 110},
-]
-
-
 def get_demo_aircraft():
-    """Erzeugt leicht bewegte Demo-Flugzeuge."""
     now = time.time()
     result = []
-
     for i, original in enumerate(DEMO_AIRCRAFT):
         plane = dict(original)
         phase = now * (0.35 + i * 0.025) + i
         plane["lat"] += math.sin(phase) * 0.018
         plane["lon"] += math.cos(phase * 0.92) * 0.025
+        # Small slow altitude variation to make demo feel alive.
+        plane["altitude_baro"] += int(math.sin(phase * 0.3) * 250)
         result.append(plane)
-
     return result
-
-# ------------------------------------------------------------
-# ADS-B Daten lesen
-# ------------------------------------------------------------
 
 
 def load_aircraft_from_readsb():
-    """Liest die von readsb erzeugte aircraft.json."""
     if not os.path.exists(AIRCRAFT_FILE):
         return []
-
     try:
         with open(AIRCRAFT_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
@@ -179,26 +126,18 @@ def load_aircraft_from_readsb():
         return []
 
     result = []
-    for plane in data.get("aircraft", []):
-        lat = plane.get("lat")
-        lon = plane.get("lon")
+    for item in data.get("aircraft", []):
+        lat, lon = item.get("lat"), item.get("lon")
         if lat is None or lon is None:
             continue
-
         try:
-            plane = dict(plane)
+            plane = dict(item)
             plane["lat"] = float(lat)
             plane["lon"] = float(lon)
+            result.append(plane)
         except (ValueError, TypeError):
             continue
-
-        result.append(plane)
-
     return result
-
-# ------------------------------------------------------------
-# Hauptanwendung
-# ------------------------------------------------------------
 
 
 class RadarApp:
@@ -206,7 +145,7 @@ class RadarApp:
         self.root = root
         self.root.title("ADS-B Ground Station")
         self.root.configure(bg=BG)
-        self.root.minsize(1000, 650)
+        self.root.minsize(1100, 700)
 
         self.demo_mode = True
         self.fullscreen = False
@@ -216,360 +155,179 @@ class RadarApp:
         self.sweep_angle = 0.0
         self.last_update = time.perf_counter()
         self.last_data_update = 0.0
-        self.sweep_speed = 75.0  # Grad pro Sekunde
+        self.sweep_speed = 42.0
 
-        # Schriftarten
-        self.title_font = font.Font(family="DejaVu Sans", size=22, weight="bold")
-        self.section_font = font.Font(family="DejaVu Sans", size=13, weight="bold")
-        self.big_font = font.Font(family="DejaVu Sans", size=17, weight="bold")
-        self.small_font = font.Font(family="DejaVu Sans", size=10)
-        self.mono_font = font.Font(family="DejaVu Sans Mono", size=10)
-        self.mono_bold = font.Font(family="DejaVu Sans Mono", size=11, weight="bold")
+        self.title_font = font.Font(family="DejaVu Sans", size=16, weight="bold")
+        self.section_font = font.Font(family="DejaVu Sans", size=11, weight="bold")
+        self.plane_font = font.Font(family="DejaVu Sans", size=11, weight="bold")
+        self.data_font = font.Font(family="DejaVu Sans Mono", size=9)
+        self.small_font = font.Font(family="DejaVu Sans", size=9)
+        self.big_font = font.Font(family="DejaVu Sans", size=20, weight="bold")
 
         self.canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-
-        self.root.bind("<Escape>", lambda event: self.root.destroy())
-        self.root.bind("<f>", lambda event: self.toggle_fullscreen())
-        self.root.bind("<F>", lambda event: self.toggle_fullscreen())
-        self.root.bind("<d>", lambda event: self.toggle_demo())
-        self.root.bind("<D>", lambda event: self.toggle_demo())
-        self.root.bind("<plus>", lambda event: self.change_range(1))
-        self.root.bind("<KP_Add>", lambda event: self.change_range(1))
-        self.root.bind("<minus>", lambda event: self.change_range(-1))
-        self.root.bind("<KP_Subtract>", lambda event: self.change_range(-1))
         self.canvas.bind("<Button-1>", self.mouse_click)
+
+        for key in ("<f>", "<F>"):
+            self.root.bind(key, lambda event: self.toggle_fullscreen())
+        for key in ("<d>", "<D>"):
+            self.root.bind(key, lambda event: self.toggle_demo())
+        for key in ("<plus>", "<KP_Add>"):
+            self.root.bind(key, lambda event: self.change_range(1))
+        for key in ("<minus>", "<KP_Subtract>"):
+            self.root.bind(key, lambda event: self.change_range(-1))
+        self.root.bind("<Escape>", lambda event: self.root.destroy())
 
         self.update_screen()
 
-    # --------------------------------------------------------
-    # Anzeige
-    # --------------------------------------------------------
+    def rounded_rect(self, x1, y1, x2, y2, radius=14, fill=PANEL, outline=None, width=1):
+        # Canvas doesn't have rounded rectangles on all Tk versions, so use a smooth polygon/arc combination.
+        self.canvas.create_rectangle(x1 + radius, y1, x2 - radius, y2, fill=fill, outline="")
+        self.canvas.create_rectangle(x1, y1 + radius, x2, y2 - radius, fill=fill, outline="")
+        self.canvas.create_oval(x1, y1, x1 + 2 * radius, y1 + 2 * radius, fill=fill, outline="")
+        self.canvas.create_oval(x2 - 2 * radius, y1, x2, y1 + 2 * radius, fill=fill, outline="")
+        self.canvas.create_oval(x1, y2 - 2 * radius, x1 + 2 * radius, y2, fill=fill, outline="")
+        self.canvas.create_oval(x2 - 2 * radius, y2 - 2 * radius, x2, y2, fill=fill, outline="")
+        if outline:
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline=outline, width=width)
 
     def draw_header(self, width):
-        self.canvas.create_rectangle(0, 0, width, 82, fill="#030a05", outline=GRID_DARK)
+        self.canvas.create_text(28, 25, text="ADS-B GROUND STATION", fill=TEXT, font=self.title_font, anchor="w")
+        self.canvas.create_text(28, 49, text="1090 MHz  •  LOCAL TRAFFIC", fill=MUTED, font=self.small_font, anchor="w")
 
-        self.canvas.create_text(
-            24, 17,
-            text="ADS-B GROUND STATION",
-            fill=GREEN,
-            font=self.title_font,
-            anchor="nw",
-        )
-        self.canvas.create_text(
-            26, 53,
-            text="1090 MHz  |  LOCAL AIRCRAFT TRACKING",
-            fill=GREEN_DIM,
-            font=self.small_font,
-            anchor="nw",
-        )
+        status = "DEMO" if self.demo_mode else "LIVE"
+        status_fill = WARNING if self.demo_mode else ACCENT
+        self.rounded_rect(width - 170, 16, width - 28, 48, 12, fill=PANEL_2)
+        self.canvas.create_oval(width - 154, 27, width - 146, 35, fill=status_fill, outline="")
+        self.canvas.create_text(width - 137, 31, text=status, fill=TEXT, font=self.section_font, anchor="w")
 
-        status = "DEMO DATA" if self.demo_mode else "READSB LIVE"
-        status_color = YELLOW if self.demo_mode else GREEN
-        self.canvas.create_text(
-            width - 28, 20,
-            text=status,
-            fill=status_color,
-            font=self.section_font,
-            anchor="ne",
-        )
-
-        self.canvas.create_text(
-            width - 28, 49,
-            text=f"RANGE {self.radar_range_km:.0f} km   |   D / F / +/-",
-            fill=GREEN_DIM,
-            font=self.small_font,
-            anchor="ne",
-        )
-
-    def draw_radar(self, x0, y0, x1, y1):
-        center_x = (x0 + x1) / 2
-        center_y = (y0 + y1) / 2
-        available_w = x1 - x0
-        available_h = y1 - y0
-        radius = min(available_w, available_h) * 0.43
-
-        # Radarfläche
-        self.canvas.create_oval(
-            center_x - radius,
-            center_y - radius,
-            center_x + radius,
-            center_y + radius,
-            fill="#031208",
-            outline=GRID,
-            width=2,
-        )
-
-        # Distanzringe
-        for fraction in (0.25, 0.50, 0.75, 1.00):
-            r = radius * fraction
-            self.canvas.create_oval(
-                center_x - r,
-                center_y - r,
-                center_x + r,
-                center_y + r,
-                outline=GRID,
-                width=1,
-            )
-            km = self.radar_range_km * fraction
-            self.canvas.create_text(
-                center_x + 7,
-                center_y - r - 2,
-                text=f"{km:.0f} km",
-                fill=GREEN_DIM,
-                font=self.small_font,
-                anchor="s",
-            )
-
-        # 45° Hilfslinien
-        for angle_deg in range(0, 360, 45):
-            angle = math.radians(angle_deg)
-            ex = center_x + math.sin(angle) * radius
-            ey = center_y - math.cos(angle) * radius
-            self.canvas.create_line(
-                center_x, center_y, ex, ey,
-                fill=GRID_DARK,
-                width=1,
-            )
-
-        # Himmelsrichtungen
-        directions = [("N", 0), ("NE", 45), ("E", 90), ("SE", 135),
-                      ("S", 180), ("SW", 225), ("W", 270), ("NW", 315)]
-        for label, deg in directions:
-            angle = math.radians(deg)
-            rr = radius + 23
-            tx = center_x + math.sin(angle) * rr
-            ty = center_y - math.cos(angle) * rr
-            self.canvas.create_text(tx, ty, text=label, fill=GREEN, font=self.small_font)
-
-        # Sweep-Linie
-        sweep = math.radians(self.sweep_angle)
-        sx = center_x + math.sin(sweep) * radius
-        sy = center_y - math.cos(sweep) * radius
-        self.canvas.create_line(center_x, center_y, sx, sy, fill=GREEN, width=2)
-
-        # Flugzeugpunkte
-        for plane in self.aircraft:
-            lat = plane.get("lat")
-            lon = plane.get("lon")
-            if lat is None or lon is None:
-                continue
-
-            distance = haversine_km(STATION_LAT, STATION_LON, lat, lon)
-            if distance > self.radar_range_km:
-                continue
-
-            bearing = bearing_deg(STATION_LAT, STATION_LON, lat, lon)
-            angle = math.radians(bearing)
-            scale = distance / self.radar_range_km
-            px = center_x + math.sin(angle) * radius * scale
-            py = center_y - math.cos(angle) * radius * scale
-
-            selected = clean_hex(plane.get("hex")) == self.selected_hex
-            point_color = YELLOW if selected else WHITE
-
-            # Kleine Flugzeug-Markierung, grob in Flugrichtung ausgerichtet
-            track = plane.get("track")
-            try:
-                heading = math.radians(float(track))
-            except (ValueError, TypeError):
-                heading = angle
-
-            dx = math.sin(heading)
-            dy = -math.cos(heading)
-            side_x = -dy
-            side_y = dx
-            length = 9 if selected else 7
-            wing = 5 if selected else 4
-
-            nose = (px + dx * length, py + dy * length)
-            left = (px - dx * length * 0.45 + side_x * wing, py - dy * length * 0.45 + side_y * wing)
-            tail = (px - dx * length * 0.6, py - dy * length * 0.6)
-            right = (px - dx * length * 0.45 - side_x * wing, py - dy * length * 0.45 - side_y * wing)
-
-            self.canvas.create_polygon(
-                nose, left, tail, right,
-                fill=point_color,
-                outline=point_color,
-            )
-
-            callsign = clean_callsign(plane.get("flight"))
-            altitude = format_altitude(plane.get("altitude_baro"))
-            label = f"{callsign}  {altitude} ft"
-
-            self.canvas.create_text(
-                px + 11,
-                py - 10,
-                text=label,
-                fill=point_color,
-                font=self.small_font,
-                anchor="w",
-            )
-
-        # Stationssymbol
-        self.canvas.create_oval(
-            center_x - 5, center_y - 5,
-            center_x + 5, center_y + 5,
-            fill=GREEN,
-            outline=WHITE,
-        )
-        self.canvas.create_text(
-            center_x + 12,
-            center_y + 12,
-            text="STATION",
-            fill=GREEN,
-            font=self.small_font,
-            anchor="nw",
-        )
-
-        return center_x, center_y, radius
+        self.canvas.create_text(width - 28, 60, text=f"RANGE  {self.radar_range_km:.0f} km", fill=MUTED, font=self.small_font, anchor="e")
+        self.canvas.create_line(24, 76, width - 24, 76, fill=BORDER)
 
     def visible_planes(self):
         planes = []
-        for plane in self.aircraft:
-            lat = plane.get("lat")
-            lon = plane.get("lon")
+        for item in self.aircraft:
+            lat, lon = item.get("lat"), item.get("lon")
             if lat is None or lon is None:
                 continue
-
             distance = haversine_km(STATION_LAT, STATION_LON, lat, lon)
             if distance <= self.radar_range_km:
-                copy = dict(plane)
-                copy["distance"] = distance
-                copy["bearing"] = bearing_deg(STATION_LAT, STATION_LON, lat, lon)
-                planes.append(copy)
-
-        planes.sort(key=lambda p: p.get("distance", 9999))
+                plane = dict(item)
+                plane["distance"] = distance
+                plane["bearing"] = bearing_deg(STATION_LAT, STATION_LON, lat, lon)
+                planes.append(plane)
+        planes.sort(key=lambda p: p["distance"])
         return planes
 
-    def draw_side_panel(self, width, height):
-        panel_x = width * 0.72
-        self.canvas.create_rectangle(panel_x, 82, width, height, fill=PANEL_BG, outline="")
-        self.canvas.create_line(panel_x, 82, panel_x, height, fill=GRID, width=1)
+    def draw_radar(self, x0, y0, x1, y1):
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2 + 4
+        radius = min((x1 - x0) * 0.43, (y1 - y0) * 0.43)
 
-        self.canvas.create_text(
-            panel_x + 20, 105,
-            text="TRAFFIC",
-            fill=GREEN,
-            font=self.section_font,
-            anchor="nw",
-        )
+        self.rounded_rect(x0, y0, x1, y1, 18, fill=PANEL, outline=BORDER)
+        self.canvas.create_text(x0 + 20, y0 + 18, text="RADAR", fill=TEXT, font=self.section_font, anchor="nw")
+        self.canvas.create_text(x0 + 20, y0 + 38, text="RELATIVE BEARING / DISTANCE", fill=MUTED, font=self.small_font, anchor="nw")
 
-        planes = self.visible_planes()
-        y = 142
-        row_h = 59
+        # Radar field
+        self.canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, fill="#0D141A", outline=BORDER, width=1)
+        for fraction, label in [(1.0, f"{self.radar_range_km:.0f}"), (0.66, f"{self.radar_range_km * 0.66:.0f}"), (0.33, f"{self.radar_range_km * 0.33:.0f}")]:
+            r = radius * fraction
+            self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=GRID, width=1)
+            self.canvas.create_text(cx + 8, cy - r + 10, text=f"{label} km", fill=MUTED, font=self.small_font, anchor="w")
 
-        for index, plane in enumerate(planes[:MAX_LIST_PLANES]):
+        # Minimal crosshair
+        self.canvas.create_line(cx - radius, cy, cx + radius, cy, fill=GRID_SOFT)
+        self.canvas.create_line(cx, cy - radius, cx, cy + radius, fill=GRID_SOFT)
+
+        for label, deg in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
+            a = math.radians(deg)
+            rr = radius + 20
+            tx = cx + math.sin(a) * rr
+            ty = cy - math.cos(a) * rr
+            self.canvas.create_text(tx, ty, text=label, fill=MUTED, font=self.section_font)
+
+        # Subtle sweep glow represented by two thin lines.
+        sweep = math.radians(self.sweep_angle)
+        for extra, color in ((3, "#294D5E"), (0, ACCENT)):
+            a = sweep - math.radians(extra)
+            sx = cx + math.sin(a) * radius
+            sy = cy - math.cos(a) * radius
+            self.canvas.create_line(cx, cy, sx, sy, fill=color, width=1 if extra else 2)
+
+        for plane in self.visible_planes():
+            distance = plane["distance"]
+            bearing = plane["bearing"]
+            a = math.radians(bearing)
+            scale = distance / self.radar_range_km
+            px = cx + math.sin(a) * radius * scale
+            py = cy - math.cos(a) * radius * scale
+            selected = clean_hex(plane.get("hex")) == self.selected_hex
+
+            # Simple aircraft marker: dot + short heading line.
+            track = plane.get("track")
+            try:
+                t = math.radians(float(track))
+                hx, hy = math.sin(t), -math.cos(t)
+            except (ValueError, TypeError):
+                hx, hy = math.sin(a), -math.cos(a)
+            size = 5 if selected else 4
+            color = WARNING if selected else TEXT
+            self.canvas.create_oval(px - size, py - size, px + size, py + size, fill=color, outline="")
+            self.canvas.create_line(px, py, px + hx * 12, py + hy * 12, fill=color, width=2)
+
             callsign = clean_callsign(plane.get("flight"))
-            hex_code = clean_hex(plane.get("hex"))
-            distance = plane.get("distance", 0.0)
+            altitude = format_altitude(plane.get("altitude_baro"))
+            self.canvas.create_text(px + 9, py - 8, text=f"{callsign}  {altitude} ft", fill=color, font=self.small_font, anchor="w")
+
+        # Station marker
+        self.canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill=ACCENT, outline="")
+        self.canvas.create_oval(cx - 9, cy - 9, cx + 9, cy + 9, outline=ACCENT_SOFT, width=1)
+        self.canvas.create_text(cx + 12, cy + 10, text="STATION", fill=MUTED, font=self.small_font, anchor="nw")
+
+    def draw_traffic_panel(self, x0, y0, x1, y1):
+        self.rounded_rect(x0, y0, x1, y1, 18, fill=PANEL, outline=BORDER)
+        self.canvas.create_text(x0 + 20, y0 + 18, text="TRAFFIC", fill=TEXT, font=self.section_font, anchor="nw")
+        planes = self.visible_planes()
+        self.canvas.create_text(x1 - 20, y0 + 19, text=f"{len(planes)} TRACKS", fill=MUTED, font=self.small_font, anchor="ne")
+
+        y = y0 + 54
+        row_h = 54
+        for index, plane in enumerate(planes[:MAX_LIST_PLANES]):
+            selected = clean_hex(plane.get("hex")) == self.selected_hex
+            if selected:
+                self.rounded_rect(x0 + 10, y - 4, x1 - 10, y + row_h - 5, 10, fill=PANEL_2)
+                self.canvas.create_rectangle(x0 + 10, y - 4, x0 + 13, y + row_h - 5, fill=ACCENT, outline="")
+
+            callsign = clean_callsign(plane.get("flight"))
             altitude = format_altitude(plane.get("altitude_baro"))
             speed = format_speed(plane.get("gs"))
-            track = format_track(plane.get("track"))
-            selected = hex_code == self.selected_hex
+            distance = plane.get("distance", 0.0)
 
-            if selected:
-                self.canvas.create_rectangle(
-                    panel_x + 10, y - 7, width - 12, y + row_h - 7,
-                    fill="#0b2113", outline=GREEN
-                )
-
-            self.canvas.create_text(
-                panel_x + 20,
-                y,
-                text=f"{index + 1:02d}  {callsign:<8}",
-                fill=YELLOW if selected else WHITE,
-                font=self.mono_bold,
-                anchor="nw",
-            )
-            self.canvas.create_text(
-                width - 20,
-                y,
-                text=f"{distance:5.1f} km",
-                fill=GREEN_DIM,
-                font=self.mono_font,
-                anchor="ne",
-            )
-            self.canvas.create_text(
-                panel_x + 20,
-                y + 21,
-                text=f"ALT {altitude:>6} ft   SPD {speed:>3} kt",
-                fill=GREEN_DIM,
-                font=self.mono_font,
-                anchor="nw",
-            )
-            self.canvas.create_text(
-                panel_x + 20,
-                y + 39,
-                text=f"HDG {track:>4}   {short_direction(plane.get('track')):>2}   ICAO {hex_code}",
-                fill=GREEN_DIM,
-                font=self.mono_font,
-                anchor="nw",
-            )
-
+            self.canvas.create_text(x0 + 22, y + 1, text=f"{index + 1:02d}", fill=MUTED, font=self.data_font, anchor="w")
+            self.canvas.create_text(x0 + 48, y, text=callsign, fill=WARNING if selected else TEXT, font=self.plane_font, anchor="w")
+            self.canvas.create_text(x1 - 20, y + 1, text=f"{distance:4.1f} km", fill=TEXT, font=self.data_font, anchor="e")
+            self.canvas.create_text(x0 + 48, y + 22, text=f"ALT {altitude} ft     SPD {speed} kt", fill=MUTED, font=self.data_font, anchor="w")
+            self.canvas.create_line(x0 + 20, y + row_h - 2, x1 - 20, y + row_h - 2, fill=BORDER)
             y += row_h
 
-        # Detailbox
-        detail_y = min(height - 175, y + 5)
-        self.canvas.create_line(panel_x + 15, detail_y, width - 15, detail_y, fill=GRID)
-        self.canvas.create_text(
-            panel_x + 20,
-            detail_y + 12,
-            text="AUSWAHL",
-            fill=GREEN,
-            font=self.small_font,
-            anchor="nw",
-        )
+        # Selected aircraft section
+        detail_y = min(y + 8, y1 - 158)
+        self.canvas.create_text(x0 + 20, detail_y, text="SELECTED AIRCRAFT", fill=MUTED, font=self.small_font, anchor="nw")
 
-        selected_plane = None
-        for plane in planes:
-            if clean_hex(plane.get("hex")) == self.selected_hex:
-                selected_plane = plane
-                break
-
+        selected_plane = next((p for p in planes if clean_hex(p.get("hex")) == self.selected_hex), None)
         if selected_plane:
-            self.draw_selected_info(panel_x + 20, detail_y + 34, selected_plane)
-        else:
-            self.canvas.create_text(
-                panel_x + 20,
-                detail_y + 34,
-                text="Flugzeug anklicken",
-                fill=GREEN_DIM,
-                font=self.small_font,
-                anchor="nw",
+            self.canvas.create_text(x0 + 20, detail_y + 23, text=clean_callsign(selected_plane.get("flight")), fill=TEXT, font=self.big_font, anchor="nw")
+            details = (
+                f"ICAO {clean_hex(selected_plane.get('hex'))}    "
+                f"HDG {format_track(selected_plane.get('track'))}\n"
+                f"{selected_plane.get('lat', 0):.5f}, {selected_plane.get('lon', 0):.5f}    "
+                f"{selected_plane.get('distance', 0):.1f} km"
             )
+            self.canvas.create_text(x0 + 20, detail_y + 55, text=details, fill=MUTED, font=self.data_font, anchor="nw", justify="left")
+        else:
+            self.canvas.create_text(x0 + 20, detail_y + 27, text="Click a track on the radar", fill=MUTED, font=self.small_font, anchor="nw")
 
-        self.canvas.create_text(
-            panel_x + 20,
-            height - 55,
-            text=f"TRACKS {len(planes)}   |   RANGE ±  = {self.radar_range_km:.0f} km",
-            fill=GREEN,
-            font=self.mono_font,
-            anchor="sw",
-        )
-        self.canvas.create_text(
-            panel_x + 20,
-            height - 30,
-            text="D Demo/Live    F Vollbild    ESC Ende    Klick = Auswahl",
-            fill=GREEN_DIM,
-            font=self.small_font,
-            anchor="sw",
-        )
-
-    def draw_selected_info(self, x, y, plane):
-        callsign = clean_callsign(plane.get("flight"))
-        self.canvas.create_text(x, y, text=callsign, fill=YELLOW, font=self.big_font, anchor="nw")
-        lines = [
-            f"ICAO {clean_hex(plane.get('hex'))}",
-            f"LAT {plane.get('lat', 0):.5f}   LON {plane.get('lon', 0):.5f}",
-            f"DIST {plane.get('distance', 0):.1f} km   BRG {plane.get('bearing', 0):.0f}°",
-        ]
-        for index, line in enumerate(lines):
-            self.canvas.create_text(x, y + 28 + index * 17, text=line, fill=GREEN_DIM, font=self.mono_font, anchor="nw")
-
-    # --------------------------------------------------------
-    # Interaktion
-    # --------------------------------------------------------
+        self.canvas.create_text(x0 + 20, y1 - 26, text="D  demo/live     F  fullscreen     +/-  range     ESC  exit", fill=MUTED, font=self.small_font, anchor="sw")
 
     def toggle_demo(self):
         self.demo_mode = not self.demo_mode
@@ -580,56 +338,48 @@ class RadarApp:
         self.root.attributes("-fullscreen", self.fullscreen)
 
     def change_range(self, direction):
-        current_index = min(range(len(RANGE_STEPS)), key=lambda i: abs(RANGE_STEPS[i] - self.radar_range_km))
-        new_index = max(0, min(len(RANGE_STEPS) - 1, current_index + direction))
+        current = min(range(len(RANGE_STEPS)), key=lambda i: abs(RANGE_STEPS[i] - self.radar_range_km))
+        new_index = max(0, min(len(RANGE_STEPS) - 1, current + direction))
         self.radar_range_km = RANGE_STEPS[new_index]
 
     def mouse_click(self, event):
-        """Wählt ein Flugzeug durch Klick in Radar oder Liste."""
         planes = self.visible_planes()
         if not planes:
             return
 
         width = self.canvas.winfo_width()
         height = self.canvas.winfo_height()
-        center_x = width * 0.36
-        center_y = height * 0.53
-        radius = min(width * 0.60, height * 0.82) * 0.43
-
-        # Falls Fenstergröße stark verändert wurde, robuster durch Neuberechnung.
-        x_limit = width * 0.70
-        y_top = 82
-        y_bottom = height
-        center_x = x_limit * 0.5
-        center_y = (y_top + y_bottom) * 0.5
-        radius = min(x_limit, height - y_top) * 0.43
+        right_x = width * 0.70
+        radar_x0, radar_y0, radar_x1, radar_y1 = 24, 92, right_x - 12, height - 18
+        cx = (radar_x0 + radar_x1) / 2
+        cy = (radar_y0 + radar_y1) / 2 + 4
+        radius = min((radar_x1 - radar_x0) * 0.43, (radar_y1 - radar_y0) * 0.43)
 
         closest = None
-        closest_distance = 18.0
-
+        closest_screen = 18
         for plane in planes:
-            bearing = plane.get("bearing", 0)
-            distance = plane.get("distance", 0)
-            angle = math.radians(bearing)
-            px = center_x + math.sin(angle) * radius * (distance / self.radar_range_km)
-            py = center_y - math.cos(angle) * radius * (distance / self.radar_range_km)
-            screen_distance = math.hypot(event.x - px, event.y - py)
-            if screen_distance < closest_distance:
-                closest_distance = screen_distance
+            a = math.radians(plane["bearing"])
+            px = cx + math.sin(a) * radius * (plane["distance"] / self.radar_range_km)
+            py = cy - math.cos(a) * radius * (plane["distance"] / self.radar_range_km)
+            d = math.hypot(event.x - px, event.y - py)
+            if d < closest_screen:
+                closest_screen = d
                 closest = plane
+
+        # Also allow clicking an item in the traffic panel.
+        if closest is None and event.x > right_x:
+            row_h = 54
+            start_y = 92 + 54
+            idx = int((event.y - start_y + 4) // row_h)
+            if 0 <= idx < min(len(planes), MAX_LIST_PLANES):
+                closest = planes[idx]
 
         if closest:
             self.selected_hex = clean_hex(closest.get("hex"))
 
-    # --------------------------------------------------------
-    # Aktualisierung
-    # --------------------------------------------------------
-
     def update_screen(self):
-        width = self.canvas.winfo_width()
-        height = self.canvas.winfo_height()
-
-        if width < 500 or height < 350:
+        width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if width < 700 or height < 450:
             self.root.after(FRAME_MS, self.update_screen)
             return
 
@@ -637,22 +387,17 @@ class RadarApp:
         dt = min(now - self.last_update, 0.1)
         self.last_update = now
 
-        # Daten deutlich seltener laden als die Grafik zeichnen.
-        # Dadurch bleibt die Animation flüssig und JSON wird nicht unnötig oft gelesen.
-        if now - self.last_data_update >= DATA_UPDATE_MS / 1000.0:
-            if self.demo_mode:
-                self.aircraft = get_demo_aircraft()
-            else:
-                self.aircraft = load_aircraft_from_readsb()
+        if now - self.last_data_update >= DATA_UPDATE_MS / 1000:
+            self.aircraft = get_demo_aircraft() if self.demo_mode else load_aircraft_from_readsb()
             self.last_data_update = now
 
-        # Flüssiger Radar-Sweep mit zeitbasierter Geschwindigkeit.
-        self.sweep_angle = (self.sweep_angle + self.sweep_speed * dt) % 360.0
+        self.sweep_angle = (self.sweep_angle + self.sweep_speed * dt) % 360
 
         self.canvas.delete("all")
         self.draw_header(width)
-        self.draw_radar(20, 90, width * 0.70 - 10, height - 15)
-        self.draw_side_panel(width, height)
+        split = width * 0.70
+        self.draw_radar(24, 92, split - 12, height - 18)
+        self.draw_traffic_panel(split + 12, 92, width - 24, height - 18)
 
         self.root.after(FRAME_MS, self.update_screen)
 
