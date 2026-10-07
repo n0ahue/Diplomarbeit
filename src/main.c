@@ -74,8 +74,10 @@ for (int i = 0; i < anzahl_messungen - 16; i++) {
         }
     }
 }
+
 printf("Insgesamt %d Flugzeug-Präambeln in diesem Block gefunden.\n", treffer);
     // 5. Verbindung sauber trennen
     rtlsdr_close(dev);
     return 0;
+}
 }
