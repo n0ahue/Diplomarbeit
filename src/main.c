@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <rtl-sdr.h>
+#include <math.h>
 
 int main() {
     rtlsdr_dev_t *dev = NULL;
@@ -32,9 +33,16 @@ int main() {
     printf("%d Bytes erfolgreich gelesen!\n", n_read);
     
     // --- NEU: Rohdaten ausgeben ---
-    printf("Die ersten 40 Rohdaten-Werte:\n");
-    for (int i = 0; i < 40; i++) {
-        printf("%d ", buffer[i]);
+    printf("Die ersten 20 berechneten Amplituden:\n");
+    for (int i = 0; i < 40; i += 2) {
+        // 1. Nullpunkt (127) abziehen
+        double i_val = (double)buffer[i] - 127.0;
+        double q_val = (double)buffer[i+1] - 127.0;
+
+        // 2. Amplitude berechnen (Pythagoras)
+        double amplitude = sqrt((i_val * i_val) + (q_val * q_val));
+
+        printf("%.1f  ", amplitude);
     }
     printf("\n");
     // ------------------------------
