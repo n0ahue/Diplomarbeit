@@ -27,13 +27,18 @@ int main() {
     
     // 4. Synchrones Lesen eines Datenblocks
     if (rtlsdr_read_sync(dev, buffer, sizeof(buffer), &n_read) < 0) {
-        fprintf(stderr, "Fehler beim Lesen der Funkdaten.\n");
-    } else {
-        printf("%d Bytes erfolgreich gelesen!\n", n_read);
-        // Hier beginnt später die Mathematik: Signalstärken berechnen, 
-        // Präambel suchen und die 112-Bit langen ADS-B Nachrichten dekodieren.
+    fprintf(stderr, "Fehler beim Lesen der Funkdaten.\n");
+} else {
+    printf("%d Bytes erfolgreich gelesen!\n", n_read);
+    
+    // --- NEU: Rohdaten ausgeben ---
+    printf("Die ersten 40 Rohdaten-Werte:\n");
+    for (int i = 0; i < 40; i++) {
+        printf("%d ", buffer[i]);
     }
-
+    printf("\n");
+    // ------------------------------
+}
     // 5. Verbindung sauber trennen
     rtlsdr_close(dev);
     return 0;
