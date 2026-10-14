@@ -2,7 +2,39 @@
 #include <stdlib.h>
 #include <rtl-sdr.h>
 #include <math.h>
-#include <stdint.h> // HINZUGEFÜGT: Wichtig für uint8_t
+#include <stdint.h>
+
+// Mathematischer Filter zur Fehlerprüfung (CRC)
+int check_crc(uint8_t *nachricht) {
+    uint32_t polynom = 0xFFFA0480; // Offizielles ADS-B Generator-Polynom
+    uint8_t daten[14];
+    
+    // Nachricht kopieren, da wir sie beim Berechnen verändern
+    for (int i = 0; i < 14; i++) {
+        daten[i] = nachricht[i];
+    }
+
+    // Bit für Bit durch die Nachricht gehen
+    for (int i = 0; i < 112 - 24; i++) {
+        int byte_index = i / 8;
+        int bit_index = 7 - (i % 8);
+
+        // Wenn das aktuelle Bit eine 1 ist, wenden wir das Polynom per XOR an
+        if ((daten[byte_index] & (1 << bit_index)) != 0) {
+            daten[byte_index] ^= (polynom >> 24) & 0xFF;
+            daten[byte_index + 1] ^= (polynom >> 16) & 0xFF;
+            daten[byte_index + 2] ^= (polynom >> 8) & 0xFF;
+            daten[byte_index + 3] ^= polynom & 0xFF;
+        }
+    }
+
+    // Wenn das Signal fehlerfrei ist, müssen die letzten 3 Bytes nun exakt 0 sein
+    if (daten[11] == 0 && daten[12] == 0 && daten[13] == 0) {
+        return 1; // Wahr (Kein Fehler, echtes Flugzeug)
+    } else {
+        return 0; // Falsch (Datenmüll, verwerfen)
+    }
+}
 
 int main() {
     rtlsdr_dev_t *dev = NULL;
@@ -66,8 +98,7 @@ int main() {
                 double durchschnitt_pausen = (pause1 + pause3 + pause4 + pause5) / 4.0;
 
                 // Ist das Signal mindestens dreimal so stark wie das Rauschen dazwischen?
-                if (durchschnitt_spitzen > durchschnitt_pausen * 3.0) { // KORRIGIERT: Abfrage nur noch einmal vorhanden
-                    printf("Präambel gefunden! Lese Nachricht...\n");
+                if (durchschnitt_spitzen > durchschnitt_pausen * 3.0) {
                     
                     uint8_t nachricht[14] = {0}; // 112 Bits = 14 Bytes
                     int array_ende = 0;
@@ -97,26 +128,27 @@ int main() {
                     }
 
                     if (!array_ende) {
-                        // Nachricht als Hexadezimal-Code ausgeben
-                        printf("Rohdaten (Hex): ");
-                        for (int j = 0; j < 14; j++) {
-                            printf("%02X", nachricht[j]);
+                        // Fehlerprüfung durchführen
+                        if (check_crc(nachricht) == 1) {
+                            
+                            int df = nachricht[0] >> 3;
+                            int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
+                            
+                            printf("GÜLTIGES SIGNAL EMPFANGEN:\n");
+                            printf("Rohdaten (Hex): ");
+                            for (int j = 0; j < 14; j++) {
+                                printf("%02X", nachricht[j]);
+                            }
+                            printf("\n");
+                            printf("Downlink Format: %d\n", df);
+                            printf("ICAO-Adresse: %06X\n", icao);
+
+                            if (df == 17) {
+                                printf("--> Das ist eine DF17 Nachricht mit Positions-/Höhendaten!\n");
+                            }
+                            printf("-----------------------------------\n\n");
+                            treffer++;
                         }
-                        printf("\n\n");
-                        // 1. Downlink Format (DF) extrahieren (die obersten 5 Bits von Byte 0)
-                int df = nachricht[0] >> 3;
-                
-                // 2. ICAO-Adresse extrahieren (Byte 1, 2 und 3 zusammenfügen)
-                int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
-
-                printf("Downlink Format: %d\n", df);
-                printf("ICAO-Adresse: %06X\n", icao);
-
-                if (df == 17) {
-                    printf("--> Treffer! Eine echte ADS-B Nachricht (DF17) mit Flugdaten!\n");
-                }
-                printf("\n");
-                        treffer++;
                     }
                     
                     // Wir überspringen das gelesene Datenpaket
@@ -124,8 +156,8 @@ int main() {
                 }
             }
         }
-        printf("Insgesamt %d Flugzeug-Präambeln in diesem Block gefunden.\n", treffer);
-    } // KORRIGIERT: Else-Block hier sauber geschlossen
+        printf("Insgesamt %d GÜLTIGE Flugzeug-Nachrichten in diesem Block gefunden.\n", treffer);
+    } 
 
     // 5. Verbindung sauber trennen
     rtlsdr_close(dev);
