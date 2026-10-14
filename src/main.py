@@ -23,7 +23,7 @@ HOME_LON = 13.0550
 MAX_KM = 600            # Positionen weiter weg gelten als Fehldekodierung
 TIMEOUT_S = 60          # Flugzeug entfernen, wenn so lange nichts mehr kam
 CPR_PAAR_S = 10         # gerade+ungerade Position muessen so nah beieinander liegen
-GAIN = "auto"           # oder Zahl in dB, z.B. 40.2 (Verstaerkung des RTL-SDR)
+GAIN = "40.2"           # oder Zahl in dB, z.B. 40.2 (Verstaerkung des RTL-SDR)
 # ------------------------------------------------------------------------------
 
 
