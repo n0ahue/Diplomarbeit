@@ -103,6 +103,19 @@ int main() {
                             printf("%02X", nachricht[j]);
                         }
                         printf("\n\n");
+                        // 1. Downlink Format (DF) extrahieren (die obersten 5 Bits von Byte 0)
+                int df = nachricht[0] >> 3;
+                
+                // 2. ICAO-Adresse extrahieren (Byte 1, 2 und 3 zusammenfügen)
+                int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
+
+                printf("Downlink Format: %d\n", df);
+                printf("ICAO-Adresse: %06X\n", icao);
+
+                if (df == 17) {
+                    printf("--> Treffer! Eine echte ADS-B Nachricht (DF17) mit Flugdaten!\n");
+                }
+                printf("\n");
                         treffer++;
                     }
                     
