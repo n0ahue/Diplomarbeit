@@ -72,7 +72,7 @@ int main() {
     rtlsdr_reset_buffer(dev);
     
     uint8_t buffer[16384]; 
-    printf("Hardware hochsensibel initialisiert. Lausche auf Flugzeuge (Abbruch mit Strg+C)...\n\n");
+    printf("Hardware initialisiert. Lausche mit Debug-Modus auf Flugzeuge (Abbruch mit Strg+C)...\n\n");
     
     while (1) {
         int n_read = 0;
@@ -84,12 +84,14 @@ int main() {
         int anzahl_messungen = n_read / 2;
         double amplituden[8192];
 
+        // Rohe I/Q-Bytes in Amplituden umwandeln
         for (int i = 0; i < n_read; i += 2) {
             double i_wert = (double)buffer[i] - 127.0;
             double q_wert = (double)buffer[i+1] - 127.0;
             amplituden[i/2] = sqrt((i_wert * i_wert) + (q_wert * q_wert));
         }
 
+        // Nach Präambeln suchen
         for (int i = 0; i < anzahl_messungen - 240; i++) {
             // Durchschnitt der 4 Präambel-Spitzen
             double spitzen = (amplituden[i] + amplituden[i+2] + amplituden[i+7] + amplituden[i+9]) / 4.0;
@@ -98,7 +100,7 @@ int main() {
             double pausen = (amplituden[i+1] + amplituden[i+3] + amplituden[i+4] + 
                              amplituden[i+5] + amplituden[i+6] + amplituden[i+8]) / 6.0;
 
-            // Dynamische Erkennung: Signal muss sich nur leicht vom Rauschen abheben
+            // Dynamische Erkennung
             if (spitzen > 4.5 && spitzen > pausen * 1.25) {
                 
                 uint8_t nachricht[14] = {0}; 
@@ -117,37 +119,27 @@ int main() {
                 }
 
                 if (!array_ende) {
-                    int crc_status = check_and_fix_crc(nachricht);
+                    int df = nachricht[0] >> 3;
+                    int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
 
-                    if (crc_status > 0) {
-                        int df = nachricht[0] >> 3;
-                        int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
-                        
-                        if (df == 17) {
-                            printf("FLUGZEUG ERKANNT ");
-                            if (crc_status == 2) {
-                                printf("[1-Bit Fehler korrigiert]");
-                            }
-                            printf(":\n");
-                            printf("ICAO-Adresse: %06X\n", icao);
-                            
+                    // Wir filtern auf DF17 (ADS-B Extended Squitter)
+                    if (df == 17) {
+                        int crc_status = check_and_fix_crc(nachricht);
+
+                        if (crc_status > 0) {
                             int type_code = nachricht[4] >> 3;
-                            printf("Type Code: %d ", type_code);
-
-                            if (type_code >= 1 && type_code <= 4) {
-                                printf("(Flugnummer / Callsign)\n");
-                            } else if (type_code >= 9 && type_code <= 18) {
-                                printf("(Flughöhe & Position)\n");
-                            } else if (type_code == 19) {
-                                printf("(Geschwindigkeit)\n");
-                            } else {
-                                printf("(Andere Telemetrie)\n");
+                            printf("[GÜLTIG - CRC OK] ICAO: %06X | Type Code: %d ", icao, type_code);
+                            if (crc_status == 2) {
+                                printf("(1-Bit repariert)");
                             }
-                            printf("-----------------------------------\n");
-
-                            // Nur bei echtem Treffer das Paket überspringen
-                            i += 16 + (112 * 2) - 1; 
+                            printf("\n-----------------------------------\n");
+                        } else {
+                            // Signal erfasst, aber CRC schlug fehl
+                            printf("[Signal erfasst - CRC fehlgeschlagen] Raw ICAO: %06X\n", icao);
                         }
+
+                        // Bei verarbeitetem Signal überspringen
+                        i += 16 + (112 * 2) - 1; 
                     }
                 }
             }
