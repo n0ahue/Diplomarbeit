@@ -30,26 +30,25 @@ int check_crc(uint8_t *nachricht) {
 
 // CRC mit 1-Bit-Fehlerkorrektur
 int check_and_fix_crc(uint8_t *nachricht) {
-    // 1. Unveränderte Nachricht testen
     if (check_crc(nachricht) == 1) {
-        return 1; // 100% fehlerfrei empfangen
+        return 1; // Unverändert fehlerfrei
     }
 
-    // 2. Versuch: Jedes der 112 Bits einzeln kippen und testen
+    // Jedes der 112 Bits einzeln testen
     for (int b = 0; b < 112; b++) {
         int byte_idx = b / 8;
         int bit_mask = 1 << (7 - (b % 8));
 
-        nachricht[byte_idx] ^= bit_mask; // Bit testweise drehen
+        nachricht[byte_idx] ^= bit_mask;
 
         if (check_crc(nachricht) == 1) {
-            return 2; // Erreicht: 1-Bit-Fehler erfolgreich repariert!
+            return 2; // 1-Bit-Fehler erfolgreich repariert
         }
 
-        nachricht[byte_idx] ^= bit_mask; // Bit wieder zurückdrehen
+        nachricht[byte_idx] ^= bit_mask;
     }
 
-    return 0; // Zu stark gestört / Datenmüll
+    return 0;
 }
 
 int main() {
@@ -61,18 +60,15 @@ int main() {
         return 1;
     }
 
-    // Frequenz 1090 MHz, Sample-Rate 2 MSPS
     rtlsdr_set_center_freq(dev, 1090000000); 
     rtlsdr_set_sample_rate(dev, 2000000);    
-    
-    // Maximale Verstärkung für hohe Empfindlichkeit
     rtlsdr_set_tuner_gain_mode(dev, 1);
     rtlsdr_set_tuner_gain(dev, 496); // 49.6 dB
 
     rtlsdr_reset_buffer(dev);
     
     uint8_t buffer[16384]; 
-    printf("Hardware initialisiert. Lausche mit Debug-Modus auf Flugzeuge (Abbruch mit Strg+C)...\n\n");
+    printf("Phasen-Abtastung aktiv. Lausche auf valide Flugzeuge...\n\n");
     
     while (1) {
         int n_read = 0;
@@ -84,61 +80,72 @@ int main() {
         int anzahl_messungen = n_read / 2;
         double amplituden[8192];
 
-        // Rohe I/Q-Bytes in Amplituden umwandeln
         for (int i = 0; i < n_read; i += 2) {
             double i_wert = (double)buffer[i] - 127.0;
             double q_wert = (double)buffer[i+1] - 127.0;
             amplituden[i/2] = sqrt((i_wert * i_wert) + (q_wert * q_wert));
         }
 
-        // Nach Präambeln suchen
         for (int i = 0; i < anzahl_messungen - 240; i++) {
-            // Durchschnitt der 4 Präambel-Spitzen
             double spitzen = (amplituden[i] + amplituden[i+2] + amplituden[i+7] + amplituden[i+9]) / 4.0;
-            
-            // Durchschnitt der Pausen dazwischen
             double pausen = (amplituden[i+1] + amplituden[i+3] + amplituden[i+4] + 
                              amplituden[i+5] + amplituden[i+6] + amplituden[i+8]) / 6.0;
 
-            // Dynamische Erkennung
             if (spitzen > 4.5 && spitzen > pausen * 1.25) {
                 
-                uint8_t nachricht[14] = {0}; 
-                int array_ende = 0;
+                int erfolg = 0;
+                uint8_t beste_nachricht[14] = {0};
+                int crc_status = 0;
 
-                // 112 Bits demodulieren (PPM)
-                for (int b = 0; b < 112; b++) {
-                    int bit_index = i + 16 + (b * 2);
-                    if (bit_index + 1 >= anzahl_messungen) {
-                        array_ende = 1;
-                        break;
+                // NEU: Phasen-Abtastung mit Versatz -1, 0, +1 ausprobieren
+                for (int offset = -1; offset <= 1; offset++) {
+                    uint8_t kandidat[14] = {0};
+                    int array_ende = 0;
+
+                    for (int b = 0; b < 112; b++) {
+                        int bit_index = i + 16 + offset + (b * 2);
+                        if (bit_index + 1 >= anzahl_messungen || bit_index < 0) {
+                            array_ende = 1;
+                            break;
+                        }
+                        int bit_wert = (amplituden[bit_index] > amplituden[bit_index + 1]) ? 1 : 0;
+                        int byte_index = b / 8;
+                        kandidat[byte_index] = (kandidat[byte_index] << 1) | bit_wert;
                     }
-                    int bit_wert = (amplituden[bit_index] > amplituden[bit_index + 1]) ? 1 : 0;
-                    int byte_index = b / 8;
-                    nachricht[byte_index] = (nachricht[byte_index] << 1) | bit_wert;
+
+                    if (!array_ende) {
+                        int res = check_and_fix_crc(kandidat);
+                        if (res > 0) {
+                            crc_status = res;
+                            for (int k = 0; k < 14; k++) beste_nachricht[k] = kandidat[k];
+                            erfolg = 1;
+                            break; // Gültige Phase gefunden!
+                        }
+                    }
                 }
 
-                if (!array_ende) {
-                    int df = nachricht[0] >> 3;
-                    int icao = (nachricht[1] << 16) | (nachricht[2] << 8) | nachricht[3];
-
-                    // Wir filtern auf DF17 (ADS-B Extended Squitter)
+                if (erfolg) {
+                    int df = beste_nachricht[0] >> 3;
+                    int icao = (beste_nachricht[1] << 16) | (beste_nachricht[2] << 8) | beste_nachricht[3];
+                    
                     if (df == 17) {
-                        int crc_status = check_and_fix_crc(nachricht);
+                        int type_code = beste_nachricht[4] >> 3;
+                        printf(">>> FLUGZEUG GÜLTIG EMPFANGEN! <<<\n");
+                        printf("ICAO Hex-Adresse: %06X\n", icao);
+                        printf("Type Code: %d ", type_code);
 
-                        if (crc_status > 0) {
-                            int type_code = nachricht[4] >> 3;
-                            printf("[GÜLTIG - CRC OK] ICAO: %06X | Type Code: %d ", icao, type_code);
-                            if (crc_status == 2) {
-                                printf("(1-Bit repariert)");
-                            }
-                            printf("\n-----------------------------------\n");
+                        if (type_code >= 1 && type_code <= 4) {
+                            printf("(Callsign / Flugnummer)\n");
+                        } else if (type_code >= 9 && type_code <= 18) {
+                            printf("(Flughöhe & Position)\n");
+                        } else if (type_code == 19) {
+                            printf("(Geschwindigkeit)\n");
                         } else {
-                            // Signal erfasst, aber CRC schlug fehl
-                            printf("[Signal erfasst - CRC fehlgeschlagen] Raw ICAO: %06X\n", icao);
+                            printf("(Telemetrie)\n");
                         }
+                        if (crc_status == 2) printf("Note: 1-Bit Fehler korrigiert.\n");
+                        printf("-----------------------------------\n");
 
-                        // Bei verarbeitetem Signal überspringen
                         i += 16 + (112 * 2) - 1; 
                     }
                 }
