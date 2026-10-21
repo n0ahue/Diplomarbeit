@@ -12,7 +12,7 @@ HOME_LAT = 47.82194
 HOME_LON = 13.04569
 
 def calc_distance_and_bearing(lat1, lon1, lat2, lon2):
-    """Berechnet Entfernung in km und Peilung in Grad (Azimut)"""
+    """Berechnet Entfernung in km und Peilung in Grad (Azimut von eurer Station aus)"""
     R = 6371.0  # Erdradius in km
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -44,20 +44,23 @@ class AircraftTracker:
 
         now = time.time()
 
+        # Neues Flugzeug anlegen
         if icao_hex not in self.aircrafts:
             self.aircrafts[icao_hex] = {
                 "callsign": "N/A",
                 "alt": 0,
+                "speed": 0,      # Geschwindigkeit in Knoten (kt)
+                "track": 0.0,    # Flugkurs in Grad (Richtung, in die das Flugzeug fliegt)
                 "lat": 0.0,
                 "lon": 0.0,
                 "dist_km": 0.0,
-                "bearing": 0.0,
+                "bearing": 0.0,  # Peilung von eurer Station aus
                 "last_seen": now
             }
 
         self.aircrafts[icao_hex]["last_seen"] = now
 
-        # MSG 1: Rufzeichen
+        # MSG 1: Rufzeichen (Callsign)
         if msg_type == "1":
             call = parts[10].strip()
             if call:
@@ -73,12 +76,17 @@ class AircraftTracker:
                 self.aircrafts[icao_hex]["lat"] = lat
                 self.aircrafts[icao_hex]["lon"] = lon
                 
-                # Distanz und Peilung berechnen
+                # Distanz und Peilung von eurer Station berechnen
                 dist, bearing = calc_distance_and_bearing(HOME_LAT, HOME_LON, lat, lon)
                 self.aircrafts[icao_hex]["dist_km"] = dist
                 self.aircrafts[icao_hex]["bearing"] = bearing
 
-        self.cleanup()
+        # MSG 4: Geschwindigkeit & Flugkurs (Track)
+        elif msg_type == "4":
+            if len(parts) > 12 and parts[12]:
+                self.aircrafts[icao_hex]["speed"] = int(float(parts[12]))
+            if len(parts) > 13 and parts[13]:
+                self.aircrafts[icao_hex]["track"] = float(parts[13])
 
     def cleanup(self):
         now = time.time()
@@ -88,18 +96,21 @@ class AircraftTracker:
 
     def print_status(self):
         os.system('cls' if os.name == 'nt' else 'clear')
-        print("=" * 95)
-        print(f"{'ICAO':<8} | {'CALLSIGN':<10} | {'HÖHE (ft)':<10} | {'DIST (km)':<10} | {'PEILUNG (°)':<11} | {'INAKTIV (s)':<10}")
-        print("=" * 95)
+        print("=" * 115)
+        print(f"{'ICAO':<8} | {'CALLSIGN':<10} | {'HÖHE (ft)':<10} | {'SPEED (kt)':<10} | {'KURS (°)':<9} | {'DIST (km)':<10} | {'PEILUNG (°)':<11} | {'INAKTIV (s)':<10}")
+        print("=" * 115)
         
         now = time.time()
         for icao, data in self.aircrafts.items():
             age = int(now - data["last_seen"])
             dist_str = f"{data['dist_km']:.1f}" if data['dist_km'] > 0 else "N/A"
             bear_str = f"{data['bearing']:.0f}°" if data['dist_km'] > 0 else "N/A"
-            print(f"{icao:<8} | {data['callsign']:<10} | {data['alt']:<10} | {dist_str:<10} | {bear_str:<11} | {age:<10}")
+            track_str = f"{data['track']:.0f}°" if data['track'] > 0 else "N/A"
+            speed_str = f"{data['speed']}" if data['speed'] > 0 else "N/A"
+
+            print(f"{icao:<8} | {data['callsign']:<10} | {data['alt']:<10} | {speed_str:<10} | {track_str:<9} | {dist_str:<10} | {bear_str:<11} | {age:<10}")
         
-        print("=" * 95)
+        print("=" * 115)
         print(f"Standort Empfänger: {HOME_LAT}, {HOME_LON} | Aktive Flugzeuge: {len(self.aircrafts)}\n")
 
 if __name__ == "__main__":
@@ -107,13 +118,12 @@ if __name__ == "__main__":
     print(f"Verbinde mit readsb auf {PI_IP}:{PORT}...")
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1.0)  # Verhindert unendliches Blockieren
+        s.settimeout(1.0)
         s.connect((PI_IP, PORT))
         
         buffer = ""
         last_display_update = 0
 
-        # Tabelle sofort einmal zeichnen
         tracker.print_status()
 
         while True:
@@ -127,10 +137,8 @@ if __name__ == "__main__":
                     for line in lines:
                         tracker.process_line(line)
             except socket.timeout:
-                # Timeout ist normal, wenn kurz keine Signale eintreffen
                 pass
 
-            # Bildschirm jede Sekunde aktualisieren
             if time.time() - last_display_update >= 1.0:
                 tracker.cleanup()
                 tracker.print_status()
