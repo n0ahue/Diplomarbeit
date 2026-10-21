@@ -4,7 +4,6 @@ import math
 import threading
 import datetime
 import os
-import json
 import pygame
 import sys
 
@@ -17,16 +16,15 @@ HOME_LAT = 47.82194
 HOME_LON = 13.04569
 MAX_RANGE_KM = 100.0
 
-# Ultra-Clean Dark Theme (wie auf dem Beispielfoto)
-COLOR_BG = (15, 16, 18)          # Sehr dunkles Graphit-Schwarz
-COLOR_TEXT_MAIN = (255, 255, 255) # Reinweiß für Haupttexte
-COLOR_TEXT_DIM = (130, 135, 145) # Dezentes Grau für Labels
-COLOR_GRID = (45, 50, 60)        # Feines Radar-Raster
-COLOR_RADAR_BLIP = (255, 255, 255)
+# Ultra-Clean Dark Theme
+COLOR_BG = (15, 16, 18)          
+COLOR_TEXT_MAIN = (255, 255, 255) 
+COLOR_TEXT_DIM = (130, 135, 145) 
+COLOR_GRID = (45, 50, 60)        
+COLOR_RADAR_BLIP = (180, 190, 205)
+COLOR_SELECTED = (0, 220, 180)    # Cyan-Highlight für ausgewähltes Flugzeug
 
-# Bekannte ICAO-Hex Präfixe / Test-Zuordnung für Flugzeugtypen
 AIRCRAFT_DB = {
-    # Beispiel-Zuordnungen (wird automatisch ergänzt/ausgelesen)
     "3C56F5": {"type": "A320", "name": "AIRBUS A320-200", "operator": "EUROWINGS", "reg": "D-AIZP"},
     "4D2261": {"type": "B737", "name": "BOEING 737-800", "operator": "RYANAIR", "reg": "EI-DHP"},
     "300A7C": {"type": "A320", "name": "AIRBUS A320neo", "operator": "LUFTHANSA", "reg": "D-AINA"},
@@ -66,7 +64,6 @@ class AircraftTracker:
 
         with self.lock:
             if icao_hex not in self.aircrafts:
-                # Typen-Info aus DB oder Fallback holen
                 db_info = AIRCRAFT_DB.get(icao_hex, {
                     "type": "GENERIC",
                     "name": "PASSENGER AIRCRAFT",
@@ -150,7 +147,6 @@ def socket_worker(tracker):
             time.sleep(2.0)
 
 class ImageLoader:
-    """Lädt und skaliert Flugzeugbilder dynamisch aus dem assets/ Ordner"""
     def __init__(self):
         self.cache = {}
 
@@ -165,7 +161,6 @@ class ImageLoader:
         if os.path.exists(filepath):
             try:
                 img = pygame.image.load(filepath).convert_alpha()
-                # Proportional skalieren
                 aspect = img.get_height() / img.get_width()
                 new_h = int(target_width * aspect)
                 scaled = pygame.transform.smoothscale(img, (target_width, new_h))
@@ -188,38 +183,90 @@ def main():
     pygame.display.set_caption("FlightScanr Dashboard")
     clock = pygame.time.Clock()
 
-    # Schriften (Clean Sans-Serif / Monospace)
     font_bold_large = pygame.font.SysFont("arial", 22, bold=True)
     font_medium = pygame.font.SysFont("arial", 13, bold=True)
     font_dim = pygame.font.SysFont("monospace", 12)
     font_data = pygame.font.SysFont("monospace", 14, bold=True)
     font_clock = pygame.font.SysFont("monospace", 12)
 
+    selected_icao = None
+    auto_select = True  # Startet im Auto-Modus (Nächstes Flugzeug)
+
+    rc_x, rc_y = 760, 170
+    r_radius = 100
+
     running = True
     while running:
+        aircrafts = tracker.get_snapshot()
+        aircraft_keys = list(aircrafts.keys())
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 running = False
 
-        screen.fill(COLOR_BG)
-        aircrafts = tracker.get_snapshot()
+            # --- TASTATUR STEUERUNG ---
+            elif event.type == pygame.KEYDOWN:
+                if aircraft_keys:
+                    if event.key in [pygame.K_RIGHT, pygame.K_TAB]:
+                        auto_select = False
+                        # Nächstes Flugzeug in der Liste wählen
+                        if selected_icao not in aircraft_keys:
+                            selected_icao = aircraft_keys[0]
+                        else:
+                            idx = (aircraft_keys.index(selected_icao) + 1) % len(aircraft_keys)
+                            selected_icao = aircraft_keys[idx]
 
-        # Nächstes Flugzeug als aktives Ziel auswählen
+                    elif event.key == pygame.K_LEFT:
+                        auto_select = False
+                        # Vorheriges Flugzeug in der Liste wählen
+                        if selected_icao not in aircraft_keys:
+                            selected_icao = aircraft_keys[-1]
+                        else:
+                            idx = (aircraft_keys.index(selected_icao) - 1) % len(aircraft_keys)
+                            selected_icao = aircraft_keys[idx]
+
+                    elif event.key == pygame.K_a:
+                        auto_select = True  # Zurück zum Auto-Modus
+
+            # --- MAUS / TOUCH STEUERUNG (Klick auf den Radar-Punkt) ---
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = event.pos
+                # Prüfen, ob ein Flugzeug auf dem Radar angeklickt wurde
+                for icao_code, data in aircrafts.items():
+                    if data["dist_km"] > 0 and data["dist_km"] <= MAX_RANGE_KM:
+                        rad = math.radians(data["bearing"])
+                        dist_p = (data["dist_km"] / MAX_RANGE_KM) * r_radius
+                        bx = int(rc_x + dist_p * math.sin(rad))
+                        by = int(rc_y - dist_p * math.cos(rad))
+
+                        # Klick-Radius 15 Pixel
+                        if math.hypot(mx - bx, my - by) <= 15:
+                            selected_icao = icao_code
+                            auto_select = False
+                            break
+
+        screen.fill(COLOR_BG)
+
+        # Aktives Ziel festlegen
         target = None
         if aircrafts:
-            valid_targets = [a for a in aircrafts.values() if a["dist_km"] > 0]
-            if valid_targets:
-                target = min(valid_targets, key=lambda x: x["dist_km"])
+            if auto_select or selected_icao not in aircrafts:
+                valid_targets = [a for a in aircrafts.values() if a["dist_km"] > 0]
+                if valid_targets:
+                    target = min(valid_targets, key=lambda x: x["dist_km"])
+                    selected_icao = list(aircrafts.keys())[list(aircrafts.values()).index(target)]
+            else:
+                target = aircrafts.get(selected_icao)
 
-        # --- 1. LINKER BEREICH: TELEMETRIE (Typ, Airline, GS, ALT, HDG) ---
+        # --- 1. LINKER BEREICH: TELEMETRIE ---
         x_left = 30
         if target:
-            # Flugzeugtyp & Airline Oben Links
             screen.blit(font_bold_large.render(target["name"], True, COLOR_TEXT_MAIN), (x_left, 35))
             screen.blit(font_medium.render(target["operator"], True, COLOR_TEXT_DIM), (x_left, 65))
-            screen.blit(font_dim.render(f"REG: {target['reg']} | CALL: {target['callsign']}", True, COLOR_TEXT_DIM), (x_left, 85))
+            
+            mode_str = "AUTO" if auto_select else "MANUAL"
+            screen.blit(font_dim.render(f"REG: {target['reg']} | CALL: {target['callsign']} | MODE: {mode_str}", True, COLOR_TEXT_DIM), (x_left, 85))
 
-            # Messwerte Unten Links (Exakt wie auf dem Beispielfoto)
             y_data = 170
             metrics = [
                 ("GS:", f"{target['speed']} kt"),
@@ -236,7 +283,7 @@ def main():
             screen.blit(font_bold_large.render("SEARCHING...", True, COLOR_TEXT_DIM), (x_left, 35))
             screen.blit(font_dim.render("Warte auf Transpondersignal", True, COLOR_TEXT_DIM), (x_left, 70))
 
-        # --- 2. MITTLERER BEREICH: PASSEGENAUES FLUGZEUGBILD ---
+        # --- 2. MITTLERER BEREICH: FLUGZEUGBILD ---
         center_x = 450
         center_y = 180
         if target:
@@ -245,12 +292,7 @@ def main():
                 rect = ac_img.get_rect(center=(center_x, center_y))
                 screen.blit(ac_img, rect)
 
-        # --- 3. RECHTER BEREICH: MINIMALISTISCHES RADAR ---
-        rc_x = 760
-        rc_y = 170
-        r_radius = 100
-
-        # Entfernungsringe & Fadenkreuz
+        # --- 3. RECHTER BEREICH: RADAR ---
         for r_km in [25, 50, 75, 100]:
             px_r = int((r_km / MAX_RANGE_KM) * r_radius)
             pygame.draw.circle(screen, COLOR_GRID, (rc_x, rc_y), px_r, 1)
@@ -267,15 +309,18 @@ def main():
                 bx = int(rc_x + dist_p * math.sin(rad))
                 by = int(rc_y - dist_p * math.cos(rad))
 
-                is_target = (target and data == target)
-                radius = 4 if is_target else 2
+                is_selected = (icao_code == selected_icao)
+                color = COLOR_SELECTED if is_selected else COLOR_RADAR_BLIP
+                radius = 5 if is_selected else 2.5
                 
-                pygame.draw.circle(screen, COLOR_TEXT_MAIN if is_target else COLOR_TEXT_DIM, (bx, by), radius)
+                pygame.draw.circle(screen, color, (bx, by), radius)
 
-        # Live-Uhrzeit unten rechts (wie im Foto)
+        # Steuerungs-Hinweis & Live-Uhrzeit unten
+        screen.blit(font_dim.render("[<- / ->] Switch | [A] Auto-Mode", True, COLOR_TEXT_DIM), (x_left, HEIGHT - 25))
+
         now_str = datetime.datetime.now().strftime("%H:%M")
         clock_txt = font_clock.render(now_str, True, COLOR_TEXT_MAIN)
-        screen.blit(clock_txt, (WIDTH - 50, HEIGHT - 30))
+        screen.blit(clock_txt, (WIDTH - 50, HEIGHT - 25))
 
         pygame.display.flip()
         clock.tick(30)
