@@ -107,22 +107,32 @@ if __name__ == "__main__":
     print(f"Verbinde mit readsb auf {PI_IP}:{PORT}...")
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)  # Verhindert unendliches Blockieren
         s.connect((PI_IP, PORT))
+        
         buffer = ""
         last_display_update = 0
 
+        # Tabelle sofort einmal zeichnen
+        tracker.print_status()
+
         while True:
-            data = s.recv(2048).decode("utf-8", errors="ignore")
-            if not data:
-                break
-            buffer += data
-            lines = buffer.split("\n")
-            buffer = lines.pop()
+            try:
+                data = s.recv(2048).decode("utf-8", errors="ignore")
+                if data:
+                    buffer += data
+                    lines = buffer.split("\n")
+                    buffer = lines.pop()
 
-            for line in lines:
-                tracker.process_line(line)
+                    for line in lines:
+                        tracker.process_line(line)
+            except socket.timeout:
+                # Timeout ist normal, wenn kurz keine Signale eintreffen
+                pass
 
-            if time.time() - last_display_update > 1.0:
+            # Bildschirm jede Sekunde aktualisieren
+            if time.time() - last_display_update >= 1.0:
+                tracker.cleanup()
                 tracker.print_status()
                 last_display_update = time.time()
 
