@@ -7,32 +7,33 @@ import os
 import pygame
 import sys
 
-# --- KONFIGURATION ---
+# ==============================================================================
+# 1. KONFIGURATION & THEME
+# ==============================================================================
 PI_IP = "127.0.0.1"       # Am Pi "127.0.0.1", am Laptop die IP des Pi
 PORT = 30003
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = 45      # Inaktive Flugzeuge nach 45s entfernen
 
+# Standort Empfänger (HTBLuVA Salzburg)
 HOME_LAT = 47.82194
 HOME_LON = 13.04569
-MAX_RANGE_KM = 100.0
+MAX_RANGE_KM = 100.0      # Maximaler Radar-Radius in km
 
-# Ultra-Clean Dark Theme
-COLOR_BG = (15, 16, 18)          
-COLOR_TEXT_MAIN = (255, 255, 255) 
-COLOR_TEXT_DIM = (130, 135, 145) 
-COLOR_GRID = (45, 50, 60)        
-COLOR_RADAR_BLIP = (180, 190, 205)
-COLOR_SELECTED = (0, 220, 180)    # Cyan-Highlight für ausgewähltes Flugzeug
+# Farbschema (Minimalist Dark Theme)
+COLOR_BG = (15, 16, 18)           # Graphit-Schwarz
+COLOR_TEXT_MAIN = (255, 255, 255)  # Reinweiß
+COLOR_TEXT_DIM = (130, 135, 145)  # Dezentes Grau
+COLOR_GRID = (40, 45, 55)         # Feines Radar-Raster
+COLOR_RADAR_BLIP = (160, 175, 195)# Inaktive Radar-Punkte
+COLOR_SELECTED = (0, 220, 180)     # Cyan-Highlight für ausgewähltes Ziel
 
-AIRCRAFT_DB = {
-    "3C56F5": {"type": "A320", "name": "AIRBUS A320-200", "operator": "EUROWINGS", "reg": "D-AIZP"},
-    "4D2261": {"type": "B737", "name": "BOEING 737-800", "operator": "RYANAIR", "reg": "EI-DHP"},
-    "300A7C": {"type": "A320", "name": "AIRBUS A320neo", "operator": "LUFTHANSA", "reg": "D-AINA"},
-    "501C5B": {"type": "B737", "name": "BOEING 737 MAX 8", "operator": "TURKISH AIRLINES", "reg": "TC-LCA"},
-}
 
+# ==============================================================================
+# 2. MATHEMATIK & TRANSPONDER-ERKENNUNG
+# ==============================================================================
 def calc_distance_and_bearing(lat1, lon1, lat2, lon2):
-    R = 6371.0
+    """Berechnet Entfernung in km und Peilung (Azimut) in Grad von der Station aus"""
+    R = 6371.0  # Erdradius in km
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
@@ -45,18 +46,58 @@ def calc_distance_and_bearing(lat1, lon1, lat2, lon2):
 
     return dist_km, bearing
 
+
+def resolve_aircraft_type_from_transponder(icao_hex, callsign):
+    """Ermittelt Flugzeugtyp & Airline aus den empfangenen Transponderdaten"""
+    icao_hex = icao_hex.upper().strip()
+    callsign = callsign.upper().strip()
+
+    ac_type = "GENERIC"
+    name = "PASSENGER AIRCRAFT"
+    operator = "COMMERCIAL FLIGHT"
+
+    # Zuordnung anhand des Transponder-Rufzeichens (Callsign)
+    if any(callsign.startswith(p) for p in ["EWG", "EWD", "DLH", "AUA", "EJU", "WZZ", "SWR", "LDM"]):
+        ac_type = "A320"
+        name = "AIRBUS A320-FAMILY"
+        if callsign.startswith("EWG") or callsign.startswith("EWD"): operator = "EUROWINGS"
+        elif callsign.startswith("DLH"): operator = "LUFTHANSA"
+        elif callsign.startswith("AUA"): operator = "AUSTRIAN AIRLINES"
+        elif callsign.startswith("EJU"): operator = "EASYJET"
+        elif callsign.startswith("WZZ"): operator = "WIZZAIR"
+        elif callsign.startswith("SWR"): operator = "SWISS INT. AIRLINES"
+
+    elif any(callsign.startswith(p) for p in ["RYR", "MAY", "TUI", "EXS", "TRA", "DAL"]):
+        ac_type = "B737"
+        name = "BOEING 737-800"
+        if callsign.startswith("RYR") or callsign.startswith("MAY"): operator = "RYANAIR"
+        elif callsign.startswith("TUI"): operator = "TUI FLY"
+        elif callsign.startswith("EXS"): operator = "JET2"
+
+    return {
+        "type": ac_type,
+        "name": name,
+        "operator": operator,
+        "reg": icao_hex
+    }
+
+
+# ==============================================================================
+# 3. DATEN-HANDLING & SOCKET LISTENER
+# ==============================================================================
 class AircraftTracker:
     def __init__(self):
         self.aircrafts = {}
         self.lock = threading.Lock()
 
-    def process_line(self, line):
+    def process_sbs_line(self, line):
+        """Zerlegt eine SBS-Textzeile vom readsb Socket auf Port 30003"""
         parts = line.strip().split(",")
         if len(parts) < 16:
             return
 
         msg_type = parts[1]
-        icao_hex = parts[4]
+        icao_hex = parts[4].upper()
         if not icao_hex:
             return
 
@@ -64,13 +105,6 @@ class AircraftTracker:
 
         with self.lock:
             if icao_hex not in self.aircrafts:
-                db_info = AIRCRAFT_DB.get(icao_hex, {
-                    "type": "GENERIC",
-                    "name": "PASSENGER AIRCRAFT",
-                    "operator": "COMMERCIAL AIRLINE",
-                    "reg": icao_hex
-                })
-
                 self.aircrafts[icao_hex] = {
                     "callsign": "N/A",
                     "alt": 0,
@@ -80,20 +114,24 @@ class AircraftTracker:
                     "lon": 0.0,
                     "dist_km": 0.0,
                     "bearing": 0.0,
-                    "type": db_info["type"],
-                    "name": db_info["name"],
-                    "operator": db_info["operator"],
-                    "reg": db_info["reg"],
+                    "type": "GENERIC",
+                    "name": "SEARCHING...",
+                    "operator": "COMMERCIAL AIRLINE",
+                    "reg": icao_hex,
                     "last_seen": now
                 }
 
             self.aircrafts[icao_hex]["last_seen"] = now
 
+            # MSG 1: Transponder Rufzeichen (Callsign)
             if msg_type == "1":
                 call = parts[10].strip()
                 if call:
                     self.aircrafts[icao_hex]["callsign"] = call
+                    info = resolve_aircraft_type_from_transponder(icao_hex, call)
+                    self.aircrafts[icao_hex].update(info)
 
+            # MSG 3: Position & Höhe
             elif msg_type == "3":
                 if parts[11]:
                     self.aircrafts[icao_hex]["alt"] = int(parts[11])
@@ -106,6 +144,11 @@ class AircraftTracker:
                     self.aircrafts[icao_hex]["dist_km"] = dist
                     self.aircrafts[icao_hex]["bearing"] = bearing
 
+                    if self.aircrafts[icao_hex]["type"] == "GENERIC":
+                        info = resolve_aircraft_type_from_transponder(icao_hex, self.aircrafts[icao_hex]["callsign"])
+                        self.aircrafts[icao_hex].update(info)
+
+            # MSG 4: Geschwindigkeit & Kurs
             elif msg_type == "4":
                 if len(parts) > 12 and parts[12]:
                     self.aircrafts[icao_hex]["speed"] = int(float(parts[12]))
@@ -113,6 +156,7 @@ class AircraftTracker:
                     self.aircrafts[icao_hex]["track"] = float(parts[13])
 
     def cleanup(self):
+        """Entfernt inaktive Flugzeuge nach Timeout"""
         now = time.time()
         with self.lock:
             expired = [icao for icao, data in self.aircrafts.items() if now - data["last_seen"] > TIMEOUT_SECONDS]
@@ -120,10 +164,13 @@ class AircraftTracker:
                 del self.aircrafts[icao]
 
     def get_snapshot(self):
+        """Liefert eine sichere Kopie des Flugzeugspeichers für die GUI"""
         with self.lock:
             return dict(self.aircrafts)
 
+
 def socket_worker(tracker):
+    """Hintergrund-Thread für den Datenempfang"""
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -139,194 +186,13 @@ def socket_worker(tracker):
                     lines = buffer.split("\n")
                     buffer = lines.pop()
                     for line in lines:
-                        tracker.process_line(line)
+                        tracker.process_sbs_line(line)
                 except socket.timeout:
                     pass
                 tracker.cleanup()
         except Exception:
             time.sleep(2.0)
 
-class ImageLoader:
-    def __init__(self):
-        self.cache = {}
 
-    def get_image(self, ac_type, target_width):
-        if ac_type in self.cache:
-            return self.cache[ac_type]
-
-        filepath = f"assets/{ac_type}.png"
-        if not os.path.exists(filepath):
-            filepath = "assets/GENERIC.png"
-
-        if os.path.exists(filepath):
-            try:
-                img = pygame.image.load(filepath).convert_alpha()
-                aspect = img.get_height() / img.get_width()
-                new_h = int(target_width * aspect)
-                scaled = pygame.transform.smoothscale(img, (target_width, new_h))
-                self.cache[ac_type] = scaled
-                return scaled
-            except Exception:
-                pass
-        return None
-
-def main():
-    tracker = AircraftTracker()
-    img_loader = ImageLoader()
-    
-    t = threading.Thread(target=socket_worker, args=(tracker,), daemon=True)
-    t.start()
-
-    pygame.init()
-    WIDTH, HEIGHT = 900, 360
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("FlightScanr Dashboard")
-    clock = pygame.time.Clock()
-
-    font_bold_large = pygame.font.SysFont("arial", 22, bold=True)
-    font_medium = pygame.font.SysFont("arial", 13, bold=True)
-    font_dim = pygame.font.SysFont("monospace", 12)
-    font_data = pygame.font.SysFont("monospace", 14, bold=True)
-    font_clock = pygame.font.SysFont("monospace", 12)
-
-    selected_icao = None
-    auto_select = True  # Startet im Auto-Modus (Nächstes Flugzeug)
-
-    rc_x, rc_y = 760, 170
-    r_radius = 100
-
-    running = True
-    while running:
-        aircrafts = tracker.get_snapshot()
-        aircraft_keys = list(aircrafts.keys())
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                running = False
-
-            # --- TASTATUR STEUERUNG ---
-            elif event.type == pygame.KEYDOWN:
-                if aircraft_keys:
-                    if event.key in [pygame.K_RIGHT, pygame.K_TAB]:
-                        auto_select = False
-                        # Nächstes Flugzeug in der Liste wählen
-                        if selected_icao not in aircraft_keys:
-                            selected_icao = aircraft_keys[0]
-                        else:
-                            idx = (aircraft_keys.index(selected_icao) + 1) % len(aircraft_keys)
-                            selected_icao = aircraft_keys[idx]
-
-                    elif event.key == pygame.K_LEFT:
-                        auto_select = False
-                        # Vorheriges Flugzeug in der Liste wählen
-                        if selected_icao not in aircraft_keys:
-                            selected_icao = aircraft_keys[-1]
-                        else:
-                            idx = (aircraft_keys.index(selected_icao) - 1) % len(aircraft_keys)
-                            selected_icao = aircraft_keys[idx]
-
-                    elif event.key == pygame.K_a:
-                        auto_select = True  # Zurück zum Auto-Modus
-
-            # --- MAUS / TOUCH STEUERUNG (Klick auf den Radar-Punkt) ---
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mx, my = event.pos
-                # Prüfen, ob ein Flugzeug auf dem Radar angeklickt wurde
-                for icao_code, data in aircrafts.items():
-                    if data["dist_km"] > 0 and data["dist_km"] <= MAX_RANGE_KM:
-                        rad = math.radians(data["bearing"])
-                        dist_p = (data["dist_km"] / MAX_RANGE_KM) * r_radius
-                        bx = int(rc_x + dist_p * math.sin(rad))
-                        by = int(rc_y - dist_p * math.cos(rad))
-
-                        # Klick-Radius 15 Pixel
-                        if math.hypot(mx - bx, my - by) <= 15:
-                            selected_icao = icao_code
-                            auto_select = False
-                            break
-
-        screen.fill(COLOR_BG)
-
-        # Aktives Ziel festlegen
-        target = None
-        if aircrafts:
-            if auto_select or selected_icao not in aircrafts:
-                valid_targets = [a for a in aircrafts.values() if a["dist_km"] > 0]
-                if valid_targets:
-                    target = min(valid_targets, key=lambda x: x["dist_km"])
-                    selected_icao = list(aircrafts.keys())[list(aircrafts.values()).index(target)]
-            else:
-                target = aircrafts.get(selected_icao)
-
-        # --- 1. LINKER BEREICH: TELEMETRIE ---
-        x_left = 30
-        if target:
-            screen.blit(font_bold_large.render(target["name"], True, COLOR_TEXT_MAIN), (x_left, 35))
-            screen.blit(font_medium.render(target["operator"], True, COLOR_TEXT_DIM), (x_left, 65))
-            
-            mode_str = "AUTO" if auto_select else "MANUAL"
-            screen.blit(font_dim.render(f"REG: {target['reg']} | CALL: {target['callsign']} | MODE: {mode_str}", True, COLOR_TEXT_DIM), (x_left, 85))
-
-            y_data = 170
-            metrics = [
-                ("GS:", f"{target['speed']} kt"),
-                ("ALT:", f"{target['alt']} ft"),
-                ("HDG:", f"{target['track']:.1f}°"),
-                ("DIST:", f"{target['dist_km']:.1f} km")
-            ]
-
-            for label, val in metrics:
-                screen.blit(font_dim.render(label, True, COLOR_TEXT_DIM), (x_left, y_data))
-                screen.blit(font_data.render(val, True, COLOR_TEXT_MAIN), (x_left + 55, y_data - 1))
-                y_data += 26
-        else:
-            screen.blit(font_bold_large.render("SEARCHING...", True, COLOR_TEXT_DIM), (x_left, 35))
-            screen.blit(font_dim.render("Warte auf Transpondersignal", True, COLOR_TEXT_DIM), (x_left, 70))
-
-        # --- 2. MITTLERER BEREICH: FLUGZEUGBILD ---
-        center_x = 450
-        center_y = 180
-        if target:
-            ac_img = img_loader.get_image(target["type"], 280)
-            if ac_img:
-                rect = ac_img.get_rect(center=(center_x, center_y))
-                screen.blit(ac_img, rect)
-
-        # --- 3. RECHTER BEREICH: RADAR ---
-        for r_km in [25, 50, 75, 100]:
-            px_r = int((r_km / MAX_RANGE_KM) * r_radius)
-            pygame.draw.circle(screen, COLOR_GRID, (rc_x, rc_y), px_r, 1)
-
-        pygame.draw.line(screen, COLOR_GRID, (rc_x - r_radius, rc_y), (rc_x + r_radius, rc_y), 1)
-        pygame.draw.line(screen, COLOR_GRID, (rc_x, rc_y - r_radius), (rc_x, rc_y + r_radius), 1)
-
-        # Radar-Blips
-        for icao_code, data in aircrafts.items():
-            if data["dist_km"] > 0 and data["dist_km"] <= MAX_RANGE_KM:
-                rad = math.radians(data["bearing"])
-                dist_p = (data["dist_km"] / MAX_RANGE_KM) * r_radius
-                
-                bx = int(rc_x + dist_p * math.sin(rad))
-                by = int(rc_y - dist_p * math.cos(rad))
-
-                is_selected = (icao_code == selected_icao)
-                color = COLOR_SELECTED if is_selected else COLOR_RADAR_BLIP
-                radius = 5 if is_selected else 2.5
-                
-                pygame.draw.circle(screen, color, (bx, by), radius)
-
-        # Steuerungs-Hinweis & Live-Uhrzeit unten
-        screen.blit(font_dim.render("[<- / ->] Switch | [A] Auto-Mode", True, COLOR_TEXT_DIM), (x_left, HEIGHT - 25))
-
-        now_str = datetime.datetime.now().strftime("%H:%M")
-        clock_txt = font_clock.render(now_str, True, COLOR_TEXT_MAIN)
-        screen.blit(clock_txt, (WIDTH - 50, HEIGHT - 25))
-
-        pygame.display.flip()
-        clock.tick(30)
-
-    pygame.quit()
-    sys.exit()
-
-if __name__ == "__main__":
-    main()
+# ==============================================================================
+# 4. BILDER-LOADER (EXAKTE ZUORDNUNG ZU DEINEN B
