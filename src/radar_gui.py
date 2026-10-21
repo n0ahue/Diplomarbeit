@@ -3,6 +3,8 @@ import time
 import math
 import threading
 import datetime
+import os
+import json
 import pygame
 import sys
 
@@ -13,16 +15,23 @@ TIMEOUT_SECONDS = 60
 
 HOME_LAT = 47.82194
 HOME_LON = 13.04569
-MAX_RANGE_KM = 100.0      # Radar-Reichweite in km
+MAX_RANGE_KM = 100.0
 
-# Farben (Dark Minimalist Theme)
-COLOR_BG = (18, 20, 26)
-COLOR_PANEL_BORDER = (40, 48, 60)
-COLOR_GRID = (60, 80, 100)
-COLOR_TEXT_MAIN = (240, 245, 250)
-COLOR_TEXT_DIM = (140, 155, 175)
-COLOR_ACCENT = (0, 220, 180)       # Cyan/Grün Glow
-COLOR_RADAR_BLIP = (0, 255, 190)
+# Ultra-Clean Dark Theme (wie auf dem Beispielfoto)
+COLOR_BG = (15, 16, 18)          # Sehr dunkles Graphit-Schwarz
+COLOR_TEXT_MAIN = (255, 255, 255) # Reinweiß für Haupttexte
+COLOR_TEXT_DIM = (130, 135, 145) # Dezentes Grau für Labels
+COLOR_GRID = (45, 50, 60)        # Feines Radar-Raster
+COLOR_RADAR_BLIP = (255, 255, 255)
+
+# Bekannte ICAO-Hex Präfixe / Test-Zuordnung für Flugzeugtypen
+AIRCRAFT_DB = {
+    # Beispiel-Zuordnungen (wird automatisch ergänzt/ausgelesen)
+    "3C56F5": {"type": "A320", "name": "AIRBUS A320-200", "operator": "EUROWINGS", "reg": "D-AIZP"},
+    "4D2261": {"type": "B737", "name": "BOEING 737-800", "operator": "RYANAIR", "reg": "EI-DHP"},
+    "300A7C": {"type": "A320", "name": "AIRBUS A320neo", "operator": "LUFTHANSA", "reg": "D-AINA"},
+    "501C5B": {"type": "B737", "name": "BOEING 737 MAX 8", "operator": "TURKISH AIRLINES", "reg": "TC-LCA"},
+}
 
 def calc_distance_and_bearing(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -57,6 +66,14 @@ class AircraftTracker:
 
         with self.lock:
             if icao_hex not in self.aircrafts:
+                # Typen-Info aus DB oder Fallback holen
+                db_info = AIRCRAFT_DB.get(icao_hex, {
+                    "type": "GENERIC",
+                    "name": "PASSENGER AIRCRAFT",
+                    "operator": "COMMERCIAL AIRLINE",
+                    "reg": icao_hex
+                })
+
                 self.aircrafts[icao_hex] = {
                     "callsign": "N/A",
                     "alt": 0,
@@ -66,6 +83,10 @@ class AircraftTracker:
                     "lon": 0.0,
                     "dist_km": 0.0,
                     "bearing": 0.0,
+                    "type": db_info["type"],
+                    "name": db_info["name"],
+                    "operator": db_info["operator"],
+                    "reg": db_info["reg"],
                     "last_seen": now
                 }
 
@@ -128,56 +149,51 @@ def socket_worker(tracker):
         except Exception:
             time.sleep(2.0)
 
-def draw_aircraft_silhouette(surface, rect):
-    """Zieht eine Vektor-Silhouette eines Verkehrsflugzeugs (Seitenansicht)"""
-    cx = rect.centerx
-    cy = rect.centery + 10
-    w = rect.width * 0.75
-    h = rect.height * 0.4
+class ImageLoader:
+    """Lädt und skaliert Flugzeugbilder dynamisch aus dem assets/ Ordner"""
+    def __init__(self):
+        self.cache = {}
 
-    # Relativ koordinierte Vektor-Punkte für die Flugzeug-Silhouette
-    pts_norm = [
-        (-0.50, 0.02),   # Bug Spitze
-        (-0.45, -0.06),  # Cockpit Scheibe
-        (-0.35, -0.08),  # Rumpf oben
-        (0.20, -0.08),   # Rumpf hinten
-        (0.35, -0.38),   # Leitwerk Spitze oben
-        (0.45, -0.38),   # Leitwerk oben hinten
-        (0.48, -0.02),   # Heckkonus
-        (0.40, 0.05),    # Rumpf unten hinten
-        (0.05, 0.08),    # Flügelansatz
-        (-0.10, 0.28),   # Flügel Spitze unten
-        (-0.20, 0.28),   # Flügel Vorne
-        (-0.08, 0.08),   # Triebwerk Aufhängung
-        (-0.35, 0.06),   # Rumpf unten vorne
-        (-0.48, 0.04)    # Bug unten
-    ]
+    def get_image(self, ac_type, target_width):
+        if ac_type in self.cache:
+            return self.cache[ac_type]
 
-    pts = [(int(cx + x * w), int(cy + y * h)) for x, y in pts_norm]
-    pygame.draw.polygon(surface, COLOR_TEXT_MAIN, pts, 2)
+        filepath = f"assets/{ac_type}.png"
+        if not os.path.exists(filepath):
+            filepath = "assets/GENERIC.png"
+
+        if os.path.exists(filepath):
+            try:
+                img = pygame.image.load(filepath).convert_alpha()
+                # Proportional skalieren
+                aspect = img.get_height() / img.get_width()
+                new_h = int(target_width * aspect)
+                scaled = pygame.transform.smoothscale(img, (target_width, new_h))
+                self.cache[ac_type] = scaled
+                return scaled
+            except Exception:
+                pass
+        return None
 
 def main():
     tracker = AircraftTracker()
+    img_loader = ImageLoader()
     
     t = threading.Thread(target=socket_worker, args=(tracker,), daemon=True)
     t.start()
 
     pygame.init()
-    # Breites Widescreen-Layout (z.B. 1024 x 400)
-    WIDTH, HEIGHT = 1024, 400
+    WIDTH, HEIGHT = 900, 360
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("FlightScanr - Desktop Radar")
+    pygame.display.set_caption("FlightScanr Dashboard")
     clock = pygame.time.Clock()
 
-    font_title = pygame.font.SysFont("monospace", 18, bold=True)
-    font_sub = pygame.font.SysFont("monospace", 12)
-    font_data = pygame.font.SysFont("monospace", 15, bold=True)
-    font_clock = pygame.font.SysFont("monospace", 13)
-
-    # Panel-Aufteilung
-    left_rect = pygame.Rect(20, 20, 320, 360)
-    center_rect = pygame.Rect(350, 20, 340, 360)
-    right_rect = pygame.Rect(700, 20, 304, 360)
+    # Schriften (Clean Sans-Serif / Monospace)
+    font_bold_large = pygame.font.SysFont("arial", 22, bold=True)
+    font_medium = pygame.font.SysFont("arial", 13, bold=True)
+    font_dim = pygame.font.SysFont("monospace", 12)
+    font_data = pygame.font.SysFont("monospace", 14, bold=True)
+    font_clock = pygame.font.SysFont("monospace", 12)
 
     running = True
     while running:
@@ -186,69 +202,63 @@ def main():
                 running = False
 
         screen.fill(COLOR_BG)
-
         aircrafts = tracker.get_snapshot()
 
-        # Nächstes / Aktives Flugzeug für das Hauptfenster auswählen
+        # Nächstes Flugzeug als aktives Ziel auswählen
         target = None
         if aircrafts:
-            # Wähle das Flugzeug mit der geringsten Entfernung
             valid_targets = [a for a in aircrafts.values() if a["dist_km"] > 0]
             if valid_targets:
                 target = min(valid_targets, key=lambda x: x["dist_km"])
 
-        # --- 1. LINKES PANEL: TELEMETRIE & FLUGDATEN ---
+        # --- 1. LINKER BEREICH: TELEMETRIE (Typ, Airline, GS, ALT, HDG) ---
+        x_left = 30
         if target:
-            callsign = target["callsign"] if target["callsign"] != "N/A" else "UNKNOWN"
-            icao = list(aircrafts.keys())[list(aircrafts.values()).index(target)]
+            # Flugzeugtyp & Airline Oben Links
+            screen.blit(font_bold_large.render(target["name"], True, COLOR_TEXT_MAIN), (x_left, 35))
+            screen.blit(font_medium.render(target["operator"], True, COLOR_TEXT_DIM), (x_left, 65))
+            screen.blit(font_dim.render(f"REG: {target['reg']} | CALL: {target['callsign']}", True, COLOR_TEXT_DIM), (x_left, 85))
 
-            # Titelzeilen
-            screen.blit(font_title.render(f"FLIGHT {callsign}", True, COLOR_TEXT_MAIN), (left_rect.x, left_rect.y + 10))
-            screen.blit(font_sub.render(f"ICAO: {icao} | COMMERCIAL AIRCRAFT", True, COLOR_TEXT_DIM), (left_rect.x, left_rect.y + 35))
-
-            # Trennlinie
-            pygame.draw.line(screen, COLOR_PANEL_BORDER, (left_rect.x, left_rect.y + 60), (left_rect.right, left_rect.y + 60), 1)
-
-            # Datenwerte im Grid
-            y_off = left_rect.y + 80
+            # Messwerte Unten Links (Exakt wie auf dem Beispielfoto)
+            y_data = 170
             metrics = [
-                ("GS (SPEED):", f"{target['speed']} kt"),
-                ("ALTITUDE:", f"{target['alt']} ft"),
-                ("HEADING:", f"{target['track']:.1f}°"),
-                ("DISTANCE:", f"{target['dist_km']:.1f} km"),
-                ("BEARING:", f"{target['bearing']:.0f}°"),
-                ("LAT / LON:", f"{target['lat']:.3f}, {target['lon']:.3f}")
+                ("GS:", f"{target['speed']} kt"),
+                ("ALT:", f"{target['alt']} ft"),
+                ("HDG:", f"{target['track']:.1f}°"),
+                ("DIST:", f"{target['dist_km']:.1f} km")
             ]
 
             for label, val in metrics:
-                screen.blit(font_sub.render(label, True, COLOR_TEXT_DIM), (left_rect.x, y_off))
-                screen.blit(font_data.render(val, True, COLOR_ACCENT), (left_rect.x + 130, y_off - 2))
-                y_off += 38
+                screen.blit(font_dim.render(label, True, COLOR_TEXT_DIM), (x_left, y_data))
+                screen.blit(font_data.render(val, True, COLOR_TEXT_MAIN), (x_left + 55, y_data - 1))
+                y_data += 26
         else:
-            screen.blit(font_title.render("SEARCHING TARGET...", True, COLOR_TEXT_DIM), (left_rect.x, left_rect.y + 20))
-            screen.blit(font_sub.render("Warte auf ADS-B Transponder...", True, COLOR_TEXT_DIM), (left_rect.x, left_rect.y + 50))
+            screen.blit(font_bold_large.render("SEARCHING...", True, COLOR_TEXT_DIM), (x_left, 35))
+            screen.blit(font_dim.render("Warte auf Transpondersignal", True, COLOR_TEXT_DIM), (x_left, 70))
 
-        # --- 2. MITTLERES PANEL: FLUGZEUG SILHOUETTE ---
-        draw_aircraft_silhouette(screen, center_rect)
+        # --- 2. MITTLERER BEREICH: PASSEGENAUES FLUGZEUGBILD ---
+        center_x = 450
+        center_y = 180
         if target:
-            model_txt = font_sub.render("PASSENGER JET (GENERIC)", True, COLOR_TEXT_DIM)
-            screen.blit(model_txt, (center_rect.centerx - model_txt.get_width() // 2, center_rect.bottom - 40))
+            ac_img = img_loader.get_image(target["type"], 280)
+            if ac_img:
+                rect = ac_img.get_rect(center=(center_x, center_y))
+                screen.blit(ac_img, rect)
 
-        # --- 3. RECHTES PANEL: KREISFÖRMIGES RADAR ---
-        rc_x = right_rect.centerx
-        rc_y = right_rect.centery - 10
-        r_radius = 120
+        # --- 3. RECHTER BEREICH: MINIMALISTISCHES RADAR ---
+        rc_x = 760
+        rc_y = 170
+        r_radius = 100
 
-        # Entfernungsringe
+        # Entfernungsringe & Fadenkreuz
         for r_km in [25, 50, 75, 100]:
             px_r = int((r_km / MAX_RANGE_KM) * r_radius)
             pygame.draw.circle(screen, COLOR_GRID, (rc_x, rc_y), px_r, 1)
 
-        # Fadenkreuz
         pygame.draw.line(screen, COLOR_GRID, (rc_x - r_radius, rc_y), (rc_x + r_radius, rc_y), 1)
         pygame.draw.line(screen, COLOR_GRID, (rc_x, rc_y - r_radius), (rc_x, rc_y + r_radius), 1)
 
-        # Flugzeuge als Radarblips plotten
+        # Radar-Blips
         for icao_code, data in aircrafts.items():
             if data["dist_km"] > 0 and data["dist_km"] <= MAX_RANGE_KM:
                 rad = math.radians(data["bearing"])
@@ -257,24 +267,15 @@ def main():
                 bx = int(rc_x + dist_p * math.sin(rad))
                 by = int(rc_y - dist_p * math.cos(rad))
 
-                # Aktives Ziel besonders hervorheben
                 is_target = (target and data == target)
-                color = COLOR_ACCENT if is_target else COLOR_RADAR_BLIP
-                radius = 5 if is_target else 3
+                radius = 4 if is_target else 2
                 
-                pygame.draw.circle(screen, color, (bx, by), radius)
+                pygame.draw.circle(screen, COLOR_TEXT_MAIN if is_target else COLOR_TEXT_DIM, (bx, by), radius)
 
-                # Kursanzeige-Vektor
-                if data["track"] > 0:
-                    t_rad = math.radians(data["track"])
-                    vx = int(bx + 12 * math.sin(t_rad))
-                    vy = int(by - 12 * math.cos(t_rad))
-                    pygame.draw.line(screen, color, (bx, by), (vx, vy), 1)
-
-        # Live-Uhrzeit unten rechts (wie im Beispielfoto)
-        now_str = datetime.datetime.now().strftime("%H:%M:%S")
-        clock_txt = font_clock.render(now_str, True, COLOR_TEXT_DIM)
-        screen.blit(clock_txt, (right_rect.right - clock_txt.get_width() - 10, right_rect.bottom - 25))
+        # Live-Uhrzeit unten rechts (wie im Foto)
+        now_str = datetime.datetime.now().strftime("%H:%M")
+        clock_txt = font_clock.render(now_str, True, COLOR_TEXT_MAIN)
+        screen.blit(clock_txt, (WIDTH - 50, HEIGHT - 30))
 
         pygame.display.flip()
         clock.tick(30)
