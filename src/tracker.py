@@ -2,7 +2,7 @@ import socket
 import time
 
 # IP des Raspberry Pi eintragen (oder "127.0.0.1" für lokalen Test am Pi)
-PI_IP = "192.168.x.x"  # Hier die IP deines Raspberry Pi eintragen
+PI_IP = "127.0.0.1"  # Hier die IP deines Raspberry Pi eintragen
 PORT = 30003
 
 class AircraftTracker:
