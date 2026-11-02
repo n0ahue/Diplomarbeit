@@ -37,6 +37,31 @@ void displayDrawRadar(const Aircraft* ac, int count) {
   oled.sendBuffer();
 }
 
+void displayDrawDetail(const Aircraft* ac, int count, int selected) {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tf);
+
+  if (count == 0) {
+    oled.setCursor(0, 12);
+    oled.print("Keine Flugzeuge");
+    oled.sendBuffer();
+    return;
+  }
+
+  const Aircraft& a = ac[selected];
+  oled.setCursor(0, 10);
+  oled.printf("%.8s  %d/%d", a.call, selected + 1, count);
+  oled.setCursor(0, 22);
+  oled.printf("Hex: %s", a.hex);
+  oled.setCursor(0, 33);
+  oled.printf("Alt: %d ft", a.alt);
+  oled.setCursor(0, 44);
+  oled.printf("Spd: %d kn", a.spd);
+  oled.setCursor(0, 55);
+  oled.printf("Hdg:%.0f  %.0f km", a.hdg, distanceKm(a.lat, a.lon));
+  oled.sendBuffer();
+}
+
 void displayShowError(const char* msg) {
   oled.clearBuffer();
   oled.setFont(u8g2_font_5x7_tf);
