@@ -14,4 +14,4 @@ constexpr uint32_t REFRESH_MS   = 5000;   // Aktualisierungsintervall
 // ---------- Taster ----------
 constexpr int      BUTTON_PIN    = 32;    // Taster zwischen GPIO32 und GND
 constexpr uint32_t DEBOUNCE_MS   = 30;    // Entprellzeit
-constexpr uint32_t LONG_PRESS_MS = 800;   // ab hier gilt ein Druck als "lang"
+constexpr uint32_t LONG_PRESS_MS = 1200;   // ab hier gilt ein Druck als "lang"
