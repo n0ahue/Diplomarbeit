@@ -13,7 +13,7 @@ constexpr uint32_t REFRESH_MS   = 5000;   // Aktualisierungsintervall
 
 // ---------- Datenquelle ----------
 constexpr bool USE_SAMPLE_DATA = false;   // true = Beispieldaten, false = echte Daten vom Pi
-#define PI_HOST "172.16.17.27"            // IP des Raspberry Pi
+#define PI_HOST "10.42.0.1"            // IP des Raspberry Pi
 constexpr int PI_PORT = 8080;
 #define PI_PATH "/api/radar"
 
