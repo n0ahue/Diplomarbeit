@@ -9,7 +9,7 @@ ButtonEvent buttonPoll() {
   static bool     lastReading = false;
   static bool     stable      = false;
   static uint32_t lastChange  = 0;
-  static uint32_t pressStart  = 0;
+  static uint32_t lastEvent   = 0;
 
   const bool     down = (digitalRead(BUTTON_PIN) == LOW);
   const uint32_t now  = millis();
@@ -21,10 +21,10 @@ ButtonEvent buttonPoll() {
 
   if ((now - lastChange) >= DEBOUNCE_MS && stable != lastReading) {
     stable = lastReading;
-    if (stable) {
-      pressStart = now;        // Taster gedrückt
-    } else {                   // Taster losgelassen
-      return ((now - pressStart) >= LONG_PRESS_MS) ? BTN_LONG : BTN_SHORT;
+    // Nur das Drücken zählt, nicht das Loslassen. Zusätzlich Sperrzeit gegen Prellen.
+    if (stable && (now - lastEvent) >= MIN_PRESS_GAP_MS) {
+      lastEvent = now;
+      return BTN_PRESSED;
     }
   }
   return BTN_NONE;

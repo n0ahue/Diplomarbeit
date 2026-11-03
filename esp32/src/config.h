@@ -12,6 +12,6 @@ constexpr size_t JSON_BUF_SIZE  = 4096;   // Puffer für die JSON-Antwort
 constexpr uint32_t REFRESH_MS   = 5000;   // Aktualisierungsintervall
 
 // ---------- Taster ----------
-constexpr int      BUTTON_PIN    = 32;    // Taster zwischen GPIO32 und GND
-constexpr uint32_t DEBOUNCE_MS   = 30;    // Entprellzeit
-constexpr uint32_t LONG_PRESS_MS = 1200;   // ab hier gilt ein Druck als "lang"
+constexpr int      BUTTON_PIN     = 32;   // Taster zwischen GPIO32 und GND
+constexpr uint32_t DEBOUNCE_MS    = 50;   // Signal muss so lange stabil sein
+constexpr uint32_t MIN_PRESS_GAP_MS = 250; // Sperrzeit nach einem Druck (verhindert Doppelauslösung)

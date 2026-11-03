@@ -5,18 +5,40 @@
 #include "display.h"
 #include "button.h"
 
-enum Page { PAGE_RADAR, PAGE_DETAIL, PAGE_COUNT };
+// Bedienung: Jeder Tastendruck schaltet eine Ansicht weiter:
+// Radar -> Flugzeug 1 -> Flugzeug 2 -> ... -> letztes Flugzeug -> Radar -> ...
 
 static Aircraft ac[MAX_AC];
 static int      acCount    = 0;
 static char     jsonBuf[JSON_BUF_SIZE];
 static uint32_t lastUpdate = 0;
-static int      page       = PAGE_RADAR;
-static int      selected   = 0;   // Auswahl auf der Detailseite
+
+static bool detail   = false;  // false = Radar, true = Detailansicht
+static int  selected = 0;      // Index des angezeigten Flugzeugs
+static char selHex[7] = "";    // Hex-Code merkt sich das Flugzeug über Updates hinweg
 
 static void render() {
-  if (page == PAGE_RADAR) displayDrawRadar(ac, acCount);
-  else                    displayDrawDetail(ac, acCount, selected);
+  if (detail) displayDrawDetail(ac, acCount, selected);
+  else        displayDrawRadar(ac, acCount);
+}
+
+static void selectAircraft(int idx) {
+  selected = idx;
+  strlcpy(selHex, ac[idx].hex, sizeof(selHex));
+}
+
+static void onPress() {
+  if (!detail) {
+    if (acCount > 0) {          // Radar -> erstes Flugzeug
+      detail = true;
+      selectAircraft(0);
+    }
+  } else if (selected + 1 < acCount) {
+    selectAircraft(selected + 1);  // nächstes Flugzeug
+  } else {
+    detail = false;                // nach dem letzten zurück zum Radar
+  }
+  render();
 }
 
 static void update() {
@@ -30,7 +52,20 @@ static void update() {
     return;
   }
   acCount = n;
-  if (selected >= acCount) selected = 0;
+
+  // Angezeigtes Flugzeug nach dem Update wiederfinden (Reihenfolge kann wechseln)
+  if (detail) {
+    bool found = false;
+    for (int i = 0; i < acCount; i++) {
+      if (strcmp(ac[i].hex, selHex) == 0) {
+        selected = i;
+        found = true;
+        break;
+      }
+    }
+    if (!found) detail = false;    // Flugzeug nicht mehr da -> zurück zum Radar
+  }
+
   Serial.printf("%d Flugzeuge, freier Heap: %u Byte\n", acCount, ESP.getFreeHeap());
   render();
 }
@@ -44,21 +79,8 @@ void setup() {
 }
 
 void loop() {
-  switch (buttonPoll()) {
-    case BTN_SHORT:   // kurzer Druck: Seite wechseln
-      page = (page + 1) % PAGE_COUNT;
-      Serial.printf("Seite %d\n", page);
-      render();
-      break;
-    case BTN_LONG:    // langer Druck: auf der Detailseite nächstes Flugzeug
-      if (page == PAGE_DETAIL && acCount > 0) {
-        selected = (selected + 1) % acCount;
-      }
-      Serial.println("Langer Druck");
-      render();
-      break;
-    default:
-      break;
+  if (buttonPoll() == BTN_PRESSED) {
+    onPress();
   }
 
   if (millis() - lastUpdate >= REFRESH_MS) {
