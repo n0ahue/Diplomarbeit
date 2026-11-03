@@ -11,6 +11,12 @@ constexpr int    MAX_AC         = 20;     // Max. Flugzeuge im RAM
 constexpr size_t JSON_BUF_SIZE  = 4096;   // Puffer für die JSON-Antwort
 constexpr uint32_t REFRESH_MS   = 5000;   // Aktualisierungsintervall
 
+// ---------- Datenquelle ----------
+constexpr bool USE_SAMPLE_DATA = false;   // true = Beispieldaten, false = echte Daten vom Pi
+#define PI_HOST "172.16.17.27"            // IP des Raspberry Pi
+constexpr int PI_PORT = 8080;
+#define PI_PATH "/api/radar"
+
 // ---------- Taster ----------
 constexpr int      BUTTON_PIN     = 32;   // Taster zwischen GPIO32 und GND
 constexpr uint32_t DEBOUNCE_MS    = 50;   // Signal muss so lange stabil sein

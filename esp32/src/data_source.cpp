@@ -1,6 +1,10 @@
 #include "data_source.h"
+#include "config.h"
+#include "secrets.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-// Beispiel im Format des api_server.py
+// Beispiel im Format des api_server.py (nur für USE_SAMPLE_DATA = true)
 static const char* SAMPLE_JSON = R"({
  "active_count": 3,
  "data": [
@@ -10,8 +14,56 @@ static const char* SAMPLE_JSON = R"({
  ]
 })";
 
+static bool wifiConnect(uint32_t timeoutMs) {
+  if (WiFi.status() == WL_CONNECTED) return true;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  const uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeoutMs) {
+    delay(250);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("WLAN verbunden, IP: %s\n", WiFi.localIP().toString().c_str());
+    return true;
+  }
+  Serial.println("WLAN-Verbindung fehlgeschlagen");
+  return false;
+}
+
+void dataSourceInit() {
+  if (!USE_SAMPLE_DATA) wifiConnect(10000);
+}
+
 bool fetchAircraftJson(char* buf, size_t len) {
-  // TODO (Schritt 1): HTTP-GET http://<Pi-IP>:8080 über W5500
-  strlcpy(buf, SAMPLE_JSON, len);
+  if (USE_SAMPLE_DATA) {
+    strlcpy(buf, SAMPLE_JSON, len);
+    return true;
+  }
+
+  if (!wifiConnect(3000)) return false;
+
+  HTTPClient http;
+  http.setTimeout(3000);
+  const String url = String("http://") + PI_HOST + ":" + String(PI_PORT) + PI_PATH;
+  if (!http.begin(url)) {
+    Serial.println("HTTP begin fehlgeschlagen");
+    return false;
+  }
+
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("HTTP-Fehler: %d\n", code);
+    http.end();
+    return false;
+  }
+
+  const String body = http.getString();
+  http.end();
+
+  if (body.length() >= len) {
+    Serial.printf("Antwort zu groß: %u Byte\n", (unsigned)body.length());
+    return false;
+  }
+  strlcpy(buf, body.c_str(), len);
   return true;
 }

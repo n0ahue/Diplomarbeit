@@ -74,6 +74,8 @@ void setup() {
   Serial.begin(115200);
   displayInit();
   buttonInit();
+  displayShowError("Verbinde WLAN...");
+  dataSourceInit();
   update();
   lastUpdate = millis();
 }
