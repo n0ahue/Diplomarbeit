@@ -66,7 +66,7 @@ void displayDrawRadar(const Aircraft* ac, int count) {
     toRadar(ac[i].lat, ac[i].lon, cx, cy, r - 4, px, py);   // etwas Rand lassen
     if ((px - cx) * (px - cx) + (py - cy) * (py - cy) > r * r) continue;
     drawPlane(px, py, ac[i].hdg);
-    if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);   // nächstes Flugzeug
+    //if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);   // nächstes Flugzeug
   }
 
   // Rechte Spalte: Anzahl, Radius, die fünf nächsten Flugzeuge mit Flugfläche
