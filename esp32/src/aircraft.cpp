@@ -23,8 +23,8 @@ int parseAircraft(const char* json, Aircraft* out, int maxCount) {
     Aircraft& a = out[count++];
     strlcpy(a.hex,  o["hex"]  | "000000", sizeof(a.hex));
     strlcpy(a.call, o["call"] | "N/A",    sizeof(a.call));
-    a.alt = o["alt"] | 0;
-    a.spd = o["spd"] | 0;
+    a.alt = (int)lroundf(o["alt"].as<float>());
+    a.spd = (int)lroundf(o["spd"].as<float>());   
     a.hdg = o["hdg"] | 0.0f;
     a.lat = o["lat"] | 0.0f;
     a.lon = o["lon"] | 0.0f;
