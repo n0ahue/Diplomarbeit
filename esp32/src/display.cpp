@@ -36,7 +36,8 @@ void displayDrawRadar(const Aircraft* ac, int count) {
   // Radar-Hintergrund: Außenring, Halbring, Mittelpunkt, Nordmarke
   oled.drawCircle(cx, cy, r);
   oled.drawCircle(cx, cy, r / 2);
-  oled.drawPixel(cx, cy);
+  oled.drawHLine(cx - 2, cy, 5);   // Standort als Kreuz
+  oled.drawVLine(cx, cy - 2, 5);
   oled.setFont(u8g2_font_4x6_tf);
   oled.setCursor(cx - 1, cy - r + 8);
   oled.print("N");
@@ -65,7 +66,7 @@ void displayDrawRadar(const Aircraft* ac, int count) {
     toRadar(ac[i].lat, ac[i].lon, cx, cy, r - 4, px, py);   // etwas Rand lassen
     if ((px - cx) * (px - cx) + (py - cy) * (py - cy) > r * r) continue;
     drawPlane(px, py, ac[i].hdg);
-    if (n == 0) oled.drawCircle(px, py, 6);
+    if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);   // nächstes Flugzeug
   }
 
   // Rechte Spalte: Anzahl, Radius, die fünf nächsten Flugzeuge mit Flugfläche
