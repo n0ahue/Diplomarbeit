@@ -11,7 +11,16 @@ static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 static inline int ri(float v) { return (int)lroundf(v); }
 
 void displayInit() {
+  oled.setBusClock(400000);   // schneller I2C-Takt, damit mehr Bilder pro Sekunde möglich sind
   oled.begin();
+}
+
+// Position nach dtSec Sekunden Geradeausflug (Dead Reckoning)
+static void predictPos(const Aircraft& a, float dtSec, float& lat, float& lon) {
+  const float distKm = a.spd * 0.000514444f * dtSec;   // Knoten -> km/s
+  const float h = a.hdg * DEG_TO_RAD;
+  lat = a.lat + cosf(h) * distKm / 111.0f;
+  lon = a.lon + sinf(h) * distKm / (111.0f * cosf(a.lat * DEG_TO_RAD));
 }
 
 // Kleines Flugzeugsymbol (Rumpf, Flügel, Leitwerk), gedreht nach dem Kurs
@@ -29,11 +38,11 @@ static void drawPlane(int x, int y, float hdgDeg) {
   oled.drawLine(ex - ri(2 * c), ey - ri(2 * s), ex + ri(2 * c), ey + ri(2 * s));
 }
 
-void displayDrawRadar(const Aircraft* ac, int count) {
+void displayDrawRadar(const Aircraft* ac, int count, float dtSec) {
   const int cx = 32, cy = 32, r = 31;
   oled.clearBuffer();
 
-  // Radar-Hintergrund: Außenring, Halbring, Mittelpunkt, Nordmarke
+  // Radar-Hintergrund: Außenring, Halbring, Standortkreuz, Nordmarke
   oled.drawCircle(cx, cy, r);
   oled.drawCircle(cx, cy, r / 2);
   oled.drawHLine(cx - 2, cy, 5);   // Standort als Kreuz
@@ -42,14 +51,15 @@ void displayDrawRadar(const Aircraft* ac, int count) {
   oled.setCursor(cx - 1, cy - r + 8);
   oled.print("N");
 
-  // Nach Entfernung sortieren (nächstes Flugzeug zuerst)
+  // Fortgeschriebene Positionen und Entfernungen berechnen
+  float plat[MAX_AC], plon[MAX_AC], dist[MAX_AC];
   int   idx[MAX_AC];
-  float dist[MAX_AC];
   for (int i = 0; i < count; i++) {
+    predictPos(ac[i], dtSec, plat[i], plon[i]);
+    dist[i] = distanceKm(plat[i], plon[i]);
     idx[i]  = i;
-    dist[i] = distanceKm(ac[i].lat, ac[i].lon);
   }
-  for (int i = 1; i < count; i++) {          // Insertion Sort
+  for (int i = 1; i < count; i++) {          // nach Entfernung sortieren (Insertion Sort)
     int k = idx[i];
     int j = i - 1;
     while (j >= 0 && dist[idx[j]] > dist[k]) {
@@ -59,14 +69,14 @@ void displayDrawRadar(const Aircraft* ac, int count) {
     idx[j + 1] = k;
   }
 
-  // Flugzeuge zeichnen, das nächste wird eingekreist
+  // Flugzeuge zeichnen, das nächste bekommt einen Rahmen
   for (int n = 0; n < count; n++) {
     const int i = idx[n];
     int px, py;
-    toRadar(ac[i].lat, ac[i].lon, cx, cy, r - 4, px, py);   // etwas Rand lassen
+    toRadar(plat[i], plon[i], cx, cy, r - 4, px, py);   // etwas Rand lassen
     if ((px - cx) * (px - cx) + (py - cy) * (py - cy) > r * r) continue;
     drawPlane(px, py, ac[i].hdg);
-    //if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);   // nächstes Flugzeug
+    if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);
   }
 
   // Rechte Spalte: Anzahl, Radius, die fünf nächsten Flugzeuge mit Flugfläche
