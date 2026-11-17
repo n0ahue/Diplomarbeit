@@ -30,6 +30,7 @@ constexpr float TIME_SCALE = USE_SIMULATION ? SIM_SPEEDUP : 1.0f;  // Simulation
 constexpr int      BUTTON_PIN       = 32;   // Taster zwischen GPIO32 und GND
 constexpr uint32_t DEBOUNCE_MS      = 50;   // Signal muss so lange stabil sein
 constexpr uint32_t MIN_PRESS_GAP_MS = 250;  // Sperrzeit nach einem Druck
+constexpr uint32_t LONG_PRESS_MS    = 800;  // Haltezeit für langen Tastendruck
 
 // ---------- Radius-Schalter (100 km / 50 km) ----------
 constexpr int      SWITCH_PIN          = 33;     // Schalter zwischen GPIO33 und GND

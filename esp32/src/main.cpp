@@ -84,8 +84,10 @@ void setup() {
 }
 
 void loop() {
-  if (buttonPoll() == BTN_PRESSED) {
+  ButtonEvent ev = buttonPoll();
+  if (ev == BTN_SHORT) {
     onPress();
+  } else if (ev == BTN_LONG) {
   }
 
   // Radius-Schalter: bei Änderung sofort neu zeichnen
