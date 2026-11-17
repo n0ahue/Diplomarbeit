@@ -4,23 +4,25 @@
 #include "network_task.h"
 #include "display.h"
 #include "button.h"
+#include "radius_switch.h"
 
 // Bedienung:
-//   Kurzer Druck: Radar -> Flugzeug 1 -> Flugzeug 2 -> ... -> letztes Flugzeug -> Radar -> ...
-//   Langer Druck: Zoom umschalten (100 -> 50 -> 25 -> 10 km -> 100 ...)
+//   Taster:   jeder Druck schaltet eine Ansicht weiter:
+//             Radar -> Flugzeug 1 -> Flugzeug 2 -> ... -> letztes Flugzeug -> Radar -> ...
+//   Schalter: wählt den Radar-Radius (100 km oder 50 km, siehe config.h)
 //
 // Das Netzwerk läuft in einem eigenen Task (network_task.cpp).
-// Diese Schleife kümmert sich nur um Taster und Anzeige und wartet nie auf das Netz.
+// Diese Schleife kümmert sich nur um Taster, Schalter und Anzeige und wartet nie auf das Netz.
 
 static AircraftSnapshot snap;        // lokale Kopie der aktuellen Daten
 static uint32_t seenVersion = 0;
 
 static uint32_t lastFrame = 0;       // letztes gezeichnetes Bild
+static float    rangeKm   = RADIUS_OPEN_KM;   // aktueller Radar-Radius (vom Schalter bestimmt)
 
 static bool detail    = false;       // false = Radar, true = Detailansicht
 static int  selected  = 0;           // Index des angezeigten Flugzeugs
 static char selHex[7] = "";          // Hex-Code merkt sich das Flugzeug über Updates hinweg
-static int  zoomIdx   = 0;           // Index in ZOOM_KM
 
 static void render() {
   lastFrame = millis();
@@ -31,7 +33,7 @@ static void render() {
   } else {
     const float ageSec = (millis() - snap.lastDataMs) / 1000.0f;   // echtes Alter der Daten
     const float dt = (ageSec > MAX_EXTRAPOLATION_S ? MAX_EXTRAPOLATION_S : ageSec) * TIME_SCALE;
-    displayDrawRadar(snap.ac, snap.count, dt, ZOOM_KM[zoomIdx], ageSec);
+    displayDrawRadar(snap.ac, snap.count, dt, rangeKm, ageSec);
   }
 }
 
@@ -40,7 +42,7 @@ static void selectAircraft(int idx) {
   strlcpy(selHex, snap.ac[idx].hex, sizeof(selHex));
 }
 
-static void onShortPress() {
+static void onPress() {
   if (!detail) {
     if (snap.count > 0) {          // Radar -> erstes Flugzeug
       detail = true;
@@ -51,12 +53,6 @@ static void onShortPress() {
   } else {
     detail = false;                // nach dem letzten zurück zum Radar
   }
-  render();
-}
-
-static void onLongPress() {
-  zoomIdx = (zoomIdx + 1) % ZOOM_COUNT;
-  Serial.printf("Zoom: %d km\n", (int)ZOOM_KM[zoomIdx]);
   render();
 }
 
@@ -81,15 +77,23 @@ void setup() {
   Serial.begin(115200);
   displayInit();
   buttonInit();
+  radiusSwitchInit();
+  rangeKm = radiusSwitchKm();
   displayShowError("Starte...");
   networkTaskStart();
 }
 
 void loop() {
-  switch (buttonPoll()) {
-    case BTN_SHORT: onShortPress(); break;
-    case BTN_LONG:  onLongPress();  break;
-    default: break;
+  if (buttonPoll() == BTN_PRESSED) {
+    onPress();
+  }
+
+  // Radius-Schalter: bei Änderung sofort neu zeichnen
+  const float r = radiusSwitchKm();
+  if (r != rangeKm) {
+    rangeKm = r;
+    Serial.printf("Radius: %d km\n", (int)rangeKm);
+    render();
   }
 
   if (networkGetSnapshot(snap, seenVersion)) {

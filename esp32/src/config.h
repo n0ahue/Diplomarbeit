@@ -10,11 +10,6 @@ constexpr float RANGE_KM = 100.0f;  // Größtes Gebiet (Simulation fliegt in di
 constexpr int    MAX_AC         = 20;     // Max. Flugzeuge im RAM
 constexpr size_t JSON_BUF_SIZE  = 4096;   // Puffer für die JSON-Antwort
 
-// ---------- Radar-Zoom ----------
-// Langer Tastendruck schaltet der Reihe nach durch diese Radien (in km)
-constexpr int   ZOOM_COUNT = 4;
-constexpr float ZOOM_KM[ZOOM_COUNT] = {100.0f, 50.0f, 25.0f, 10.0f};
-
 // ---------- Datenquelle ----------
 // Reihenfolge: Simulation > Beispieldaten > echte Daten vom Pi
 constexpr bool  USE_SIMULATION = true;    // true = fünf bewegte Testflugzeuge
@@ -31,8 +26,13 @@ constexpr float MAX_EXTRAPOLATION_S = 5.0f; // so lange werden Positionen ohne n
 constexpr float STALE_DATA_S = 3.0f;      // ab so vielen Sekunden ohne Daten blinkt die Statusanzeige
 constexpr float TIME_SCALE = USE_SIMULATION ? SIM_SPEEDUP : 1.0f;  // Simulation läuft im Zeitraffer
 
-// ---------- Taster ----------
+// ---------- Taster (Seiten durchschalten) ----------
 constexpr int      BUTTON_PIN       = 32;   // Taster zwischen GPIO32 und GND
 constexpr uint32_t DEBOUNCE_MS      = 50;   // Signal muss so lange stabil sein
 constexpr uint32_t MIN_PRESS_GAP_MS = 250;  // Sperrzeit nach einem Druck
-constexpr uint32_t LONG_PRESS_MS    = 1000; // ab hier gilt ein Druck als "lang" (Zoom)
+
+// ---------- Radius-Schalter (100 km / 50 km) ----------
+constexpr int      SWITCH_PIN          = 33;     // Schalter zwischen GPIO33 und GND
+constexpr float    RADIUS_OPEN_KM      = 100.0f; // Schalter offen   (Pin HIGH, per Pull-up)
+constexpr float    RADIUS_CLOSED_KM    = 50.0f;  // Schalter geschlossen (Pin LOW, mit GND verbunden)
+constexpr uint32_t SWITCH_DEBOUNCE_MS  = 50;
