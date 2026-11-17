@@ -5,8 +5,9 @@
 #include "display.h"
 #include "button.h"
 
-// Bedienung: Jeder Tastendruck schaltet eine Ansicht weiter:
-// Radar -> Flugzeug 1 -> Flugzeug 2 -> ... -> letztes Flugzeug -> Radar -> ...
+// Bedienung:
+//   Kurzer Druck: Radar -> Flugzeug 1 -> Flugzeug 2 -> ... -> letztes Flugzeug -> Radar -> ...
+//   Langer Druck: Zoom umschalten (100 -> 50 -> 25 -> 10 km -> 100 ...)
 //
 // Das Netzwerk läuft in einem eigenen Task (network_task.cpp).
 // Diese Schleife kümmert sich nur um Taster und Anzeige und wartet nie auf das Netz.
@@ -19,6 +20,7 @@ static uint32_t lastFrame = 0;       // letztes gezeichnetes Bild
 static bool detail    = false;       // false = Radar, true = Detailansicht
 static int  selected  = 0;           // Index des angezeigten Flugzeugs
 static char selHex[7] = "";          // Hex-Code merkt sich das Flugzeug über Updates hinweg
+static int  zoomIdx   = 0;           // Index in ZOOM_KM
 
 static void render() {
   lastFrame = millis();
@@ -27,9 +29,9 @@ static void render() {
   } else if (detail) {
     displayDrawDetail(snap.ac, snap.count, selected);
   } else {
-    float dt = (millis() - snap.lastDataMs) / 1000.0f;
-    if (dt > MAX_EXTRAPOLATION_S) dt = MAX_EXTRAPOLATION_S;
-    displayDrawRadar(snap.ac, snap.count, dt * TIME_SCALE);
+    const float ageSec = (millis() - snap.lastDataMs) / 1000.0f;   // echtes Alter der Daten
+    const float dt = (ageSec > MAX_EXTRAPOLATION_S ? MAX_EXTRAPOLATION_S : ageSec) * TIME_SCALE;
+    displayDrawRadar(snap.ac, snap.count, dt, ZOOM_KM[zoomIdx], ageSec);
   }
 }
 
@@ -38,7 +40,7 @@ static void selectAircraft(int idx) {
   strlcpy(selHex, snap.ac[idx].hex, sizeof(selHex));
 }
 
-static void onPress() {
+static void onShortPress() {
   if (!detail) {
     if (snap.count > 0) {          // Radar -> erstes Flugzeug
       detail = true;
@@ -49,6 +51,12 @@ static void onPress() {
   } else {
     detail = false;                // nach dem letzten zurück zum Radar
   }
+  render();
+}
+
+static void onLongPress() {
+  zoomIdx = (zoomIdx + 1) % ZOOM_COUNT;
+  Serial.printf("Zoom: %d km\n", (int)ZOOM_KM[zoomIdx]);
   render();
 }
 
@@ -78,8 +86,10 @@ void setup() {
 }
 
 void loop() {
-  if (buttonPoll() == BTN_PRESSED) {
-    onPress();
+  switch (buttonPoll()) {
+    case BTN_SHORT: onShortPress(); break;
+    case BTN_LONG:  onLongPress();  break;
+    default: break;
   }
 
   if (networkGetSnapshot(snap, seenVersion)) {

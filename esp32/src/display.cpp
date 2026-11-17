@@ -38,7 +38,7 @@ static void drawPlane(int x, int y, float hdgDeg) {
   oled.drawLine(ex - ri(2 * c), ey - ri(2 * s), ex + ri(2 * c), ey + ri(2 * s));
 }
 
-void displayDrawRadar(const Aircraft* ac, int count, float dtSec) {
+void displayDrawRadar(const Aircraft* ac, int count, float dtSec, float rangeKm, float ageSec) {
   const int cx = 32, cy = 32, r = 31;
   oled.clearBuffer();
 
@@ -73,10 +73,10 @@ void displayDrawRadar(const Aircraft* ac, int count, float dtSec) {
   for (int n = 0; n < count; n++) {
     const int i = idx[n];
     int px, py;
-    toRadar(plat[i], plon[i], cx, cy, r - 4, px, py);   // etwas Rand lassen
+    toRadar(plat[i], plon[i], cx, cy, r - 4, rangeKm, px, py);   // etwas Rand lassen
     if ((px - cx) * (px - cx) + (py - cy) * (py - cy) > r * r) continue;
     drawPlane(px, py, ac[i].hdg);
-    //if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);
+    if (n == 0) oled.drawFrame(px - 5, py - 5, 11, 11);
   }
 
   // Rechte Spalte: Anzahl, Radius, die fünf nächsten Flugzeuge mit Flugfläche
@@ -84,13 +84,21 @@ void displayDrawRadar(const Aircraft* ac, int count, float dtSec) {
   oled.setCursor(68, 8);
   oled.printf("AC: %d", count);
   oled.setCursor(68, 17);
-  oled.printf("R:%dkm", (int)RANGE_KM);
+  oled.printf("R:%dkm", (int)rangeKm);
   for (int n = 0; n < count && n < 5; n++) {
     const Aircraft& a = ac[idx[n]];
     int fl = a.alt / 100;
     if (fl > 999) fl = 999;
     oled.setCursor(68, 27 + n * 8);
     oled.printf("%.6s F%03d", a.call, fl);
+  }
+
+  // Verbindungsstatus oben rechts:
+  // ausgefüllter Punkt = frische Daten, blinkender Ring = Daten veraltet
+  if (ageSec < STALE_DATA_S) {
+    oled.drawDisc(123, 4, 2);
+  } else if ((millis() / 400) % 2) {
+    oled.drawCircle(123, 4, 2);
   }
   oled.sendBuffer();
 }

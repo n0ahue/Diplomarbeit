@@ -8,7 +8,9 @@ void buttonInit() {
 ButtonEvent buttonPoll() {
   static bool     lastReading = false;
   static bool     stable      = false;
+  static bool     longFired   = false;
   static uint32_t lastChange  = 0;
+  static uint32_t pressStart  = 0;
   static uint32_t lastEvent   = 0;
 
   const bool     down = (digitalRead(BUTTON_PIN) == LOW);
@@ -21,11 +23,20 @@ ButtonEvent buttonPoll() {
 
   if ((now - lastChange) >= DEBOUNCE_MS && stable != lastReading) {
     stable = lastReading;
-    // Nur das Drücken zählt, nicht das Loslassen. Zusätzlich Sperrzeit gegen Prellen.
-    if (stable && (now - lastEvent) >= MIN_PRESS_GAP_MS) {
-      lastEvent = now;
-      return BTN_PRESSED;
+    if (stable) {                       // gedrückt
+      pressStart = now;
+      longFired  = false;
+    } else if (!longFired && (now - lastEvent) >= MIN_PRESS_GAP_MS) {
+      lastEvent = now;                  // losgelassen, ohne dass "lang" schon kam
+      return BTN_SHORT;
     }
+  }
+
+  // Langer Druck: sofort melden, sobald die Haltezeit erreicht ist
+  if (stable && !longFired && (now - pressStart) >= LONG_PRESS_MS) {
+    longFired = true;
+    lastEvent = now;
+    return BTN_LONG;
   }
   return BTN_NONE;
 }

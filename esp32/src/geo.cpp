@@ -8,10 +8,10 @@ static void offsetsKm(float lat, float lon, float& dxKm, float& dyKm) {
   dxKm = (lon - HOME_LON) * 111.0f * cosf(HOME_LAT * DEG_TO_RAD);  // nach Osten
 }
 
-void toRadar(float lat, float lon, int cx, int cy, int r, int& px, int& py) {
+void toRadar(float lat, float lon, int cx, int cy, int r, float rangeKm, int& px, int& py) {
   float dx, dy;
   offsetsKm(lat, lon, dx, dy);
-  float scale = r / RANGE_KM;
+  float scale = r / rangeKm;
   px = cx + (int)(dx * scale);
   py = cy - (int)(dy * scale);
 }
