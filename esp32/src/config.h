@@ -12,7 +12,7 @@ constexpr size_t JSON_BUF_SIZE  = 4096;   // Puffer für die JSON-Antwort
 
 // ---------- Datenquelle ----------
 // Reihenfolge: Simulation > Beispieldaten > echte Daten vom Pi
-constexpr bool  USE_SIMULATION = true;    // true = fünf bewegte Testflugzeuge
+constexpr bool  USE_SIMULATION = false;    // true = fünf bewegte Testflugzeuge
 constexpr float SIM_SPEEDUP    = 10.0f;   // Zeitraffer der Simulation
 constexpr bool  USE_SAMPLE_DATA = false;  // true = feste Beispieldaten
 #define PI_HOST "10.42.0.1"               // IP des Raspberry Pi (Hotspot)
