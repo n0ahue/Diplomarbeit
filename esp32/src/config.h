@@ -34,6 +34,6 @@ constexpr uint32_t LONG_PRESS_MS    = 800;  // Haltezeit für langen Tastendruck
 
 // ---------- Radius-Schalter (100 km / 50 km) ----------
 constexpr int      SWITCH_PIN          = 33;     // Schalter zwischen GPIO33 und GND
-constexpr float    RADIUS_OPEN_KM      = 100.0f; // Schalter offen   (Pin HIGH, per Pull-up)
+constexpr float    RADIUS_OPEN_KM      = 150.0f; // Schalter offen   (Pin HIGH, per Pull-up)
 constexpr float    RADIUS_CLOSED_KM    = 50.0f;  // Schalter geschlossen (Pin LOW, mit GND verbunden)
 constexpr uint32_t SWITCH_DEBOUNCE_MS  = 50;
