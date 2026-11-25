@@ -21,3 +21,4 @@ float distanceKm(float lat, float lon) {
   offsetsKm(lat, lon, dx, dy);
   return sqrtf(dx * dx + dy * dy);
 }
+

@@ -3,7 +3,11 @@
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 
-// ---------- Pinbelegung (aus dem funktionierenden Test-Code) ----------
+// 1 = Farb-Bits auf die aktiven Leitungen DB0..2 (Blau) und DB5..6 (Grün) mappen
+// 0 = Standard 16-Bit RGB565 (sobald DB8..DB15 / 16-Bit-Jumper aktiv sind)
+#define LCD_REMAP_GB_ONLY 1
+
+// ---------- Pinbelegung ----------
 static const uint8_t PIN_CS  = 14;
 static const uint8_t PIN_RS  = 8;    // Command/Data
 static const uint8_t PIN_WR  = 9;
@@ -17,8 +21,6 @@ static const uint8_t DB_PINS[16] = {
 static const uint32_t WR_MASK = 1u << PIN_WR;
 static const uint32_t RS_MASK = 1u << PIN_RS;
 
-// Schnelle Datenausgabe: Für jedes Byte ist vorberechnet, welche GPIOs gesetzt werden müssen.
-// GPIO 0..31 liegen im Register "OUT", GPIO 32..48 im Register "OUT1".
 static uint32_t lutLo0[256], lutLo1[256], lutHi0[256], lutHi1[256];
 static uint32_t dataMask0 = 0, dataMask1 = 0;
 
@@ -39,32 +41,52 @@ static void buildTables() {
   }
 }
 
+static inline uint16_t mapColorBits(uint16_t v) {
+#if LCD_REMAP_GB_ONLY
+  // RGB565: G = Bits 10..5, B = Bits 4..0
+  // Auf aktive Pins mappen: G[5..4] -> DB6..5, B[4..2] -> DB2..0
+  uint16_t hw = 0;
+  if (v & (1u << 10)) hw |= (1u << 6);   // Grün MSB   -> DB6 (GPIO 38)
+  if (v & (1u << 9))  hw |= (1u << 5);   // Grün MSB-1 -> DB5 (GPIO 39)
+  if (v & (1u << 4))  hw |= (1u << 2);   // Blau MSB   -> DB2 (GPIO 42)
+  if (v & (1u << 3))  hw |= (1u << 1);   // Blau MSB-1 -> DB1 (GPIO 2)
+  if (v & (1u << 2))  hw |= (1u << 0);   // Blau MSB-2 -> DB0 (GPIO 1)
+  return hw;
+#else
+  return v;
+#endif
+}
+
 // Legt 16 Bit auf den Datenbus (WR bleibt unverändert)
-static inline __attribute__((always_inline)) void busPut(uint16_t v) {
-  const uint32_t s0 = lutLo0[v & 0xFF] | lutHi0[v >> 8];
-  const uint32_t s1 = lutLo1[v & 0xFF] | lutHi1[v >> 8];
+static inline __attribute__((always_inline)) void busPutRaw(uint16_t raw) {
+  const uint32_t s0 = lutLo0[raw & 0xFF] | lutHi0[raw >> 8];
+  const uint32_t s1 = lutLo1[raw & 0xFF] | lutHi1[raw >> 8];
   REG_WRITE(GPIO_OUT_W1TC_REG,  dataMask0 & ~s0);
   REG_WRITE(GPIO_OUT_W1TS_REG,  s0);
   REG_WRITE(GPIO_OUT1_W1TC_REG, dataMask1 & ~s1);
   REG_WRITE(GPIO_OUT1_W1TS_REG, s1);
 }
 
+static inline __attribute__((always_inline)) void busPut(uint16_t color) {
+  busPutRaw(mapColorBits(color));
+}
+
 // WR-Impuls: Das Display übernimmt die Daten bei der steigenden Flanke.
 static inline __attribute__((always_inline)) void strobe() {
   REG_WRITE(GPIO_OUT_W1TC_REG, WR_MASK);
-  __asm__ __volatile__("nop; nop; nop; nop; nop; nop; nop; nop;");   // WR-Low-Zeit
+  __asm__ __volatile__("nop; nop; nop; nop; nop; nop; nop; nop;");
   REG_WRITE(GPIO_OUT_W1TS_REG, WR_MASK);
 }
 
 static inline void writeCmd(uint8_t cmd) {
   REG_WRITE(GPIO_OUT_W1TC_REG, RS_MASK);
-  busPut(cmd);
+  busPutRaw(cmd);
   strobe();
 }
 
 static inline void writeData(uint16_t d) {
   REG_WRITE(GPIO_OUT_W1TS_REG, RS_MASK);
-  busPut(d);
+  busPutRaw(d);
   strobe();
 }
 
@@ -112,10 +134,10 @@ void Stripe::writeFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) {
 void Lcd7::begin() {
   buildTables();
 
-  neopixelWrite(48, 0, 0, 0);          // eingebaute RGB-LED aus (wie im Test-Code)
+  neopixelWrite(48, 0, 0, 0);
 
   pinMode(PIN_BL, OUTPUT);
-  digitalWrite(PIN_BL, HIGH);          // Hintergrundbeleuchtung an
+  digitalWrite(PIN_BL, HIGH);
 
   pinMode(PIN_CS, OUTPUT);
   pinMode(PIN_RS, OUTPUT);
@@ -124,7 +146,7 @@ void Lcd7::begin() {
   digitalWrite(PIN_WR, HIGH);
   for (int i = 0; i < 16; i++) pinMode(DB_PINS[i], OUTPUT);
 
-  digitalWrite(PIN_CS, LOW);           // das Display ist das einzige Gerät am Bus: CS bleibt dauerhaft aktiv
+  digitalWrite(PIN_CS, LOW);
   initController();
 }
 
@@ -143,7 +165,6 @@ void Lcd7::initController() {
   digitalWrite(PIN_RST, HIGH);
   delay(150);
 
-  // Ab hier unverändert aus dem funktionierenden Test-Code
   cd(0xE2, {0x23, 0x02, 0x04});           // PLL einstellen
   cd(0xE0, {0x01});  delay(10);           // PLL starten
   cd(0xE0, {0x03});  delay(10);           // PLL als Takt verwenden
@@ -154,7 +175,7 @@ void Lcd7::initController() {
   cd(0xB6, {VT_HI, VT_LO, 0x00, 23, 16, 0x00, 0x00});
   cd(0xBA, {0x0F, 0x01});
   cd(0xB8, {0x0F, 0x01});
-  cd(0x36, {LCD_ADDRESS_MODE});           // Bildausrichtung (siehe lcd7.h)
+  cd(0x36, {0x01});
   cd(0xF0, {0x03});                        // 16-Bit-Pixeldaten (RGB565)
   cd(0xBE, {0x06, 0xFF, 0x01, 0xFF, 0x00, 0x00});
   cd(0x11, {});      delay(20);           // Sleep aus
@@ -172,7 +193,7 @@ void Lcd7::setWindow(int x, int y, int w, int h) {
 }
 
 void Lcd7::pushPixels(const uint16_t* px, uint32_t n) {
-  REG_WRITE(GPIO_OUT_W1TS_REG, RS_MASK);   // Daten, keine Befehle
+  REG_WRITE(GPIO_OUT_W1TS_REG, RS_MASK);
   for (uint32_t i = 0; i < n; i++) {
     busPut(px[i]);
     strobe();
@@ -188,7 +209,7 @@ void Lcd7::fillRect(int x, int y, int w, int h, uint16_t color) {
 
   setWindow(x, y, w, h);
   REG_WRITE(GPIO_OUT_W1TS_REG, RS_MASK);
-  busPut(color);                            // Farbe einmal anlegen, dann nur noch WR toggeln
+  busPut(color);
   const uint32_t n = (uint32_t)w * h;
   for (uint32_t i = 0; i < n; i++) strobe();
 }
