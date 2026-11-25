@@ -3,7 +3,7 @@
 #include "geo.h"
 #include "config.h"
 
-static void offsetsKm(float lat, float lon, float& dxKm, float& dyKm) {
+void offsetsKm(float lat, float lon, float& dxKm, float& dyKm) {
   dyKm = (lat - HOME_LAT) * 111.0f;                                // nach Norden
   dxKm = (lon - HOME_LON) * 111.0f * cosf(HOME_LAT * DEG_TO_RAD);  // nach Osten
 }

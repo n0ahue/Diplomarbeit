@@ -1,5 +1,8 @@
 #pragma once
 
+// Versatz eines Punktes zum Antennenstandort in km (Ost = dxKm, Nord = dyKm).
+void offsetsKm(float lat, float lon, float& dxKm, float& dyKm);
+
 // Rechnet Lat/Lon in Pixelkoordinaten um (Radar-Mittelpunkt cx/cy, Radius r in Pixel).
 // rangeKm ist der Radius des Radars in km (Zoomstufe).
 // Reine Rechenlogik, unabhängig vom Display.
